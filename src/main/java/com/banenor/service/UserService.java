@@ -87,4 +87,20 @@ public class UserService {
                 })
                 .map(this::mapToUserResponse);
     }
+
+    /**
+     * Updates the avatar URL of the user with the given userId.
+     *
+     * @param userId    the user's ID.
+     * @param avatarUrl the new avatar URL.
+     * @return a Mono emitting the updated UserResponse.
+     */
+    public Mono<UserResponse> updateAvatar(Long userId, String avatarUrl) {
+        return userRepository.findById(userId)
+                .flatMap(user -> {
+                    user.setAvatar(avatarUrl);
+                    return userRepository.save(user);
+                })
+                .map(this::mapToUserResponse);
+    }
 }
