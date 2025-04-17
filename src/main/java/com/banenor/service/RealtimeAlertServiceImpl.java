@@ -36,7 +36,7 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             (obj instanceof Number) ? ((Number) obj).doubleValue() : 0.0;
 
     /**
-     * Helper method to build and send an alert email for a specific metric.
+     * Sends an alert email if the latest metric exceeds the threshold.
      */
     private Mono<Void> sendThresholdAlert(String alertEmail, String metricName, Double latestValue, Double threshold, String unit) {
         if (latestValue > threshold) {
@@ -64,8 +64,12 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
     }
 
     private Mono<Void> processAlertsForMP1(HaugfjellMP1AxlesRepository repo, Integer trainNo, String alertEmail) {
+        // Dynamic Speed Alert: Retrieve aggregated speed (avg_speed) across all groups,
+        // take the maximum aggregated speed as the representative value.
         Mono<Void> speedAlert = safeMono(
-                repo.findFirstSpdTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicSpeedAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgSpeed())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestSpeed = toDouble.apply(latest);
@@ -76,8 +80,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Left Vibration Alert
         Mono<Void> vibrationLeftAlert = safeMono(
-                repo.findFirstVviblTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVibrationLeftAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVibrationLeft())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVibrationLeft = toDouble.apply(latest);
@@ -88,8 +95,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Right Vibration Alert
         Mono<Void> vibrationRightAlert = safeMono(
-                repo.findFirstVvibrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVibrationRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVibrationRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVibrationRight = toDouble.apply(latest);
@@ -100,8 +110,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Vertical Force Right Alert
         Mono<Void> verticalForceRightAlert = safeMono(
-                repo.findFirstVfrcrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVerticalForceRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVerticalForceRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVerticalForceRight = toDouble.apply(latest);
@@ -112,8 +125,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Vertical Force Left Alert
         Mono<Void> verticalForceLeftAlert = safeMono(
-                repo.findFirstVfrclTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVerticalForceLeftAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVerticalForceLeft())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVerticalForceLeft = toDouble.apply(latest);
@@ -124,8 +140,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Lateral Force Right Alert
         Mono<Void> lateralForceRightAlert = safeMono(
-                repo.findFirstLfrcrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicLateralForceRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgLateralForceRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestLateralForceRight = toDouble.apply(latest);
@@ -136,8 +155,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Lateral Vibration Right Alert
         Mono<Void> lateralVibrationRightAlert = safeMono(
-                repo.findFirstLvibrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicLateralVibrationRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgLateralVibrationRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestLateralVibrationRight = toDouble.apply(latest);
@@ -158,9 +180,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
     }
 
     private Mono<Void> processAlertsForMP3(HaugfjellMP3AxlesRepository repo, Integer trainNo, String alertEmail) {
-        // Similar alert processing for MP3 repository
+        // Dynamic Speed Alert for MP3
         Mono<Void> speedAlert = safeMono(
-                repo.findFirstSpdTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicSpeedAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgSpeed())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestSpeed = toDouble.apply(latest);
@@ -171,8 +195,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Vibration Left Alert for MP3
         Mono<Void> vibrationLeftAlert = safeMono(
-                repo.findFirstVviblTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVibrationLeftAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVibrationLeft())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVibrationLeft = toDouble.apply(latest);
@@ -183,8 +210,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Vibration Right Alert for MP3
         Mono<Void> vibrationRightAlert = safeMono(
-                repo.findFirstVvibrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVibrationRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVibrationRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVibrationRight = toDouble.apply(latest);
@@ -195,8 +225,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Vertical Force Right Alert for MP3
         Mono<Void> verticalForceRightAlert = safeMono(
-                repo.findFirstVfrcrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVerticalForceRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVerticalForceRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVerticalForceRight = toDouble.apply(latest);
@@ -207,8 +240,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Vertical Force Left Alert for MP3
         Mono<Void> verticalForceLeftAlert = safeMono(
-                repo.findFirstVfrclTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicVerticalForceLeftAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgVerticalForceLeft())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestVerticalForceLeft = toDouble.apply(latest);
@@ -219,8 +255,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Lateral Force Right Alert for MP3
         Mono<Void> lateralForceRightAlert = safeMono(
-                repo.findFirstLfrcrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicLateralForceRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgLateralForceRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestLateralForceRight = toDouble.apply(latest);
@@ -231,8 +270,11 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
             return Mono.empty();
         });
 
+        // Dynamic Lateral Vibration Right Alert for MP3
         Mono<Void> lateralVibrationRightAlert = safeMono(
-                repo.findFirstLvibrTp1ByTrainNoOrderByCreatedAtDesc(trainNo)
+                repo.findDynamicLateralVibrationRightAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgLateralVibrationRight())
+                        .reduce(Double::max)
                         .defaultIfEmpty(0.0)
         ).flatMap(latest -> {
             Double latestLateralVibrationRight = toDouble.apply(latest);

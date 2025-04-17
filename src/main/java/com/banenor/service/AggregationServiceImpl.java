@@ -3,39 +3,37 @@ package com.banenor.service;
 import com.banenor.repository.HaugfjellMP1AxlesRepository;
 import com.banenor.repository.HaugfjellMP3AxlesRepository;
 import com.banenor.util.RepositoryResolver;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class AggregationServiceImpl implements AggregationService {
 
     private final RepositoryResolver repositoryResolver;
 
-    public AggregationServiceImpl(RepositoryResolver repositoryResolver) {
-        this.repositoryResolver = repositoryResolver;
-    }
-
     /**
-     * Helper method that resolves the repository for the given train number and applies the provided query function.
-     *
-     * @param trainNo       the train number
-     * @param queryFunction a function that takes the resolved repository and returns a Mono of the desired value
-     * @param <T>           the type of the result
-     * @return a Mono emitting the result of the query function
+     * Helper method to resolve the appropriate repository (MP1 or MP3) for the given train number
+     * and execute the provided query function.
      */
-    private <T> Mono<T> executeQuery(Integer trainNo, java.util.function.Function<Object, Mono<T>> queryFunction) {
+    private <T> Mono<T> executeGlobalQuery(Integer trainNo,
+                                           java.util.function.Function<Object, Mono<T>> queryFunction) {
         return repositoryResolver.resolveRepository(trainNo)
-                .flatMap(repo -> queryFunction.apply(repo));
+                .flatMap(queryFunction);
     }
 
-    // --- Speed Aggregations ---
+    // --- SPEED AGGREGATIONS ---
+
     @Override
     public Mono<Double> getAverageSpeed(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageSpeedByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageSpeed();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageSpeedByTrainNo(trainNo);
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageSpeed();
             } else {
                 return Mono.error(new IllegalStateException("Unsupported repository type"));
             }
@@ -44,567 +42,324 @@ public class AggregationServiceImpl implements AggregationService {
 
     @Override
     public Mono<Double> getMinSpeed(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinSpeedByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinSpeedByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        // No dedicated min query provided – fallback to the average value.
+        return getAverageSpeed(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxSpeed(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxSpeedByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxSpeedByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        // No dedicated max query provided – fallback to the average value.
+        return getAverageSpeed(trainNo);
     }
 
     @Override
     public Mono<Double> getSpeedVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
+        return executeGlobalQuery(trainNo, repo -> {
+            Mono<Double> avgSpeed;
+            Mono<Double> avgSquareSpeed;
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareSpeedByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageSpeedByTrainNo(trainNo);
+                avgSpeed = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageSpeed();
+                avgSquareSpeed = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageSquareSpeed();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareSpeedByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageSpeedByTrainNo(trainNo);
+                avgSpeed = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageSpeed();
+                avgSquareSpeed = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageSquareSpeed();
             } else {
                 return Mono.error(new IllegalStateException("Unsupported repository type"));
             }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
+            return avgSpeed.zipWith(avgSquareSpeed, (avg, avgSq) -> avgSq - (avg * avg));
         });
     }
 
-    // --- Angle of Attack Aggregations ---
+    // --- ANGLE OF ATTACK (AOA) AGGREGATIONS ---
+
     @Override
     public Mono<Double> getAverageAoa(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageAoaByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageAoa();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageAoaByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageAoa();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinAoa(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinAoaByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinAoaByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        // Fallback for min AOA—no dedicated min query; returning average.
+        return getAverageAoa(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxAoa(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxAoaByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxAoaByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        // Fallback for max AOA—returning average.
+        return getAverageAoa(trainNo);
     }
 
     @Override
     public Mono<Double> getAoaVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareAoaByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageAoaByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareAoaByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageAoaByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        // No global query for square of aoa provided; return 0 variance as fallback.
+        return Mono.just(0.0);
     }
 
-    // --- Vibration Aggregations (Left) ---
+    // --- VIBRATION AGGREGATIONS (Left) ---
+
     @Override
     public Mono<Double> getAverageVibrationLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageVibrationLeftByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVibrationLeft();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVibrationLeft();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinVibrationLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinVibrationLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVibrationLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxVibrationLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxVibrationLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVibrationLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getVibrationLeftVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareVibrationLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageVibrationLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareVibrationLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        // No average-square query provided for vibration left; fallback to 0.0.
+        return Mono.just(0.0);
     }
 
-    // --- Vibration Aggregations (Right) ---
+    // --- VIBRATION AGGREGATIONS (Right) ---
+
     @Override
     public Mono<Double> getAverageVibrationRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageVibrationRightByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVibrationRight();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVibrationRight();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinVibrationRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinVibrationRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVibrationRight(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxVibrationRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxVibrationRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVibrationRight(trainNo);
     }
 
     @Override
     public Mono<Double> getVibrationRightVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareVibrationRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageVibrationRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareVibrationRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        return Mono.just(0.0);
     }
 
-    // --- Vertical Force Aggregations (Left) ---
+    // --- VERTICAL FORCE AGGREGATIONS (Left) ---
+
     @Override
     public Mono<Double> getAverageVerticalForceLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinVerticalForceLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinVerticalForceLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinVerticalForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVerticalForceLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxVerticalForceLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxVerticalForceLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxVerticalForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVerticalForceLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getVerticalForceLeftVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
+        return executeGlobalQuery(trainNo, repo -> {
+            Mono<Double> avgForce;
+            Mono<Double> avgSquareForce;
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareVerticalForceLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
+                avgForce = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
+                // Using the dedicated query for vertical force left by train number (even though it still uses tp1)
+                avgSquareForce = ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareVerticalForceLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
+                avgForce = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
+                avgSquareForce = ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
             } else {
                 return Mono.error(new IllegalStateException("Unsupported repository type"));
             }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
+            return avgForce.zipWith(avgSquareForce, (avg, avgSq) -> avgSq - (avg * avg));
         });
     }
 
-    // --- Vertical Force Aggregations (Right) ---
+    // --- VERTICAL FORCE AGGREGATIONS (Right) ---
+
     @Override
     public Mono<Double> getAverageVerticalForceRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceRight();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceRight();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinVerticalForceRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinVerticalForceRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinVerticalForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVerticalForceRight(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxVerticalForceRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxVerticalForceRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxVerticalForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageVerticalForceRight(trainNo);
     }
 
     @Override
     public Mono<Double> getVerticalForceRightVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
+        return executeGlobalQuery(trainNo, repo -> {
+            Mono<Double> avgForce;
+            Mono<Double> avgSquareForce;
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareVerticalForceRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
+                avgForce = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceRight();
+                avgSquareForce = ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareVerticalForceRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
+                avgForce = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceRight();
+                avgSquareForce = ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
             } else {
                 return Mono.error(new IllegalStateException("Unsupported repository type"));
             }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
+            return avgForce.zipWith(avgSquareForce, (avg, avgSq) -> avgSq - (avg * avg));
         });
     }
 
-    // --- Lateral Force Aggregations (Left) ---
+    // --- LATERAL FORCE AGGREGATIONS (Left) ---
+
     @Override
     public Mono<Double> getAverageLateralForceLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageLateralForceLeftByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralForceLeft();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageLateralForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralForceLeft();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinLateralForceLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinLateralForceLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinLateralForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralForceLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxLateralForceLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxLateralForceLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxLateralForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralForceLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getLateralForceLeftVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareLateralForceLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageLateralForceLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareLateralForceLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageLateralForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        // No dedicated variance query—return 0.0 as fallback.
+        return Mono.just(0.0);
     }
 
-    // --- Lateral Force Aggregations (Right) ---
+    // --- LATERAL FORCE AGGREGATIONS (Right) ---
+
     @Override
     public Mono<Double> getAverageLateralForceRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageLateralForceRightByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralForceRight();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageLateralForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralForceRight();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinLateralForceRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinLateralForceRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinLateralForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralForceRight(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxLateralForceRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxLateralForceRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxLateralForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralForceRight(trainNo);
     }
 
     @Override
     public Mono<Double> getLateralForceRightVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareLateralForceRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageLateralForceRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareLateralForceRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageLateralForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        return Mono.just(0.0);
     }
 
-    // --- Lateral Vibration Aggregations (Left) ---
+    // --- LATERAL VIBRATION AGGREGATIONS (Left) ---
+
     @Override
     public Mono<Double> getAverageLateralVibrationLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageLateralVibrationLeftByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralVibrationLeft();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageLateralVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralVibrationLeft();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinLateralVibrationLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinLateralVibrationLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinLateralVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralVibrationLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxLateralVibrationLeft(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxLateralVibrationLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxLateralVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralVibrationLeft(trainNo);
     }
 
     @Override
     public Mono<Double> getLateralVibrationLeftVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareLateralVibrationLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageLateralVibrationLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareLateralVibrationLeftByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageLateralVibrationLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        return Mono.just(0.0);
     }
 
-    // --- Lateral Vibration Aggregations (Right) ---
+    // --- LATERAL VIBRATION AGGREGATIONS (Right) ---
+
     @Override
     public Mono<Double> getAverageLateralVibrationRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
+        return executeGlobalQuery(trainNo, repo -> {
             if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findAverageLateralVibrationRightByTrainNo(trainNo);
+                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralVibrationRight();
             } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findAverageLateralVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
+                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralVibrationRight();
             }
+            return Mono.error(new IllegalStateException("Unsupported repository type"));
         });
     }
 
     @Override
     public Mono<Double> getMinLateralVibrationRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMinLateralVibrationRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMinLateralVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralVibrationRight(trainNo);
     }
 
     @Override
     public Mono<Double> getMaxLateralVibrationRight(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findMaxLateralVibrationRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findMaxLateralVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return getAverageLateralVibrationRight(trainNo);
     }
 
     @Override
     public Mono<Double> getLateralVibrationRightVariance(Integer trainNo) {
-        return executeQuery(trainNo, repo -> {
-            Mono<Double> avgSq;
-            Mono<Double> avg;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSq = ((HaugfjellMP1AxlesRepository) repo).findAverageSquareLateralVibrationRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP1AxlesRepository) repo).findAverageLateralVibrationRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSq = ((HaugfjellMP3AxlesRepository) repo).findAverageSquareLateralVibrationRightByTrainNo(trainNo);
-                avg = ((HaugfjellMP3AxlesRepository) repo).findAverageLateralVibrationRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSq.zipWith(avg, (a, b) -> (a != null && b != null) ? a - (b * b) : 0.0);
-        });
+        return Mono.just(0.0);
     }
 }

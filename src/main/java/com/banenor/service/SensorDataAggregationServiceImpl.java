@@ -90,16 +90,16 @@ public class SensorDataAggregationServiceImpl implements SensorDataAggregationSe
                     double globalAvgSpeedSquare = combineAverages(cast(arr[20]), cast(arr[21]));
                     double speedVariance = globalAvgSpeedSquare - Math.pow(globalAvgSpeed, 2);
 
-                    log.info("Global average speed (spd_tp1): {}", globalAvgSpeed);
-                    log.info("Global average AOA (aoa_tp1): {}", globalAvgAoa);
-                    log.info("Global average vibration left (vvibl_tp1): {}", globalAvgVibLeft);
-                    log.info("Global average vibration right (vvibr_tp1): {}", globalAvgVibRight);
-                    log.info("Global average vertical force left (vfrcl_tp1): {}", globalAvgVertForceLeft);
-                    log.info("Global average vertical force right (vfrcr_tp1): {}", globalAvgVertForceRight);
-                    log.info("Global average lateral force left (lfrcl_tp1): {}", globalAvgLatForceLeft);
-                    log.info("Global average lateral force right (lfrcr_tp1): {}", globalAvgLatForceRight);
-                    log.info("Global average lateral vibration left (lvibl_tp1): {}", globalAvgLatVibLeft);
-                    log.info("Global average lateral vibration right (lvibr_tp1): {}", globalAvgLatVibRight);
+                    log.info("Global average speed (spd): {}", globalAvgSpeed);
+                    log.info("Global average AOA (aoa): {}", globalAvgAoa);
+                    log.info("Global average vibration left (vvibl): {}", globalAvgVibLeft);
+                    log.info("Global average vibration right (vvibr): {}", globalAvgVibRight);
+                    log.info("Global average vertical force left (vfrcl): {}", globalAvgVertForceLeft);
+                    log.info("Global average vertical force right (vfrcr): {}", globalAvgVertForceRight);
+                    log.info("Global average lateral force left (lfrcl): {}", globalAvgLatForceLeft);
+                    log.info("Global average lateral force right (lfrcr): {}", globalAvgLatForceRight);
+                    log.info("Global average lateral vibration left (lvibl): {}", globalAvgLatVibLeft);
+                    log.info("Global average lateral vibration right (lvibr): {}", globalAvgLatVibRight);
                     log.info("Computed global speed variance: {}", speedVariance);
 
                     // Return a non-null marker to satisfy the zip function.

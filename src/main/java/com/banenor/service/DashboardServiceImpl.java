@@ -46,90 +46,185 @@ public class DashboardServiceImpl implements DashboardService {
                 .flatMap(header -> {
                     if (header instanceof HaugfjellMP1Header) {
                         log.info("Found MP1 header for train_no: {}", analysisId);
-                        return aggregateMetricsForMP1(analysisId, mp1Repository);
+                        return aggregateMetricsForMP1(analysisId);
                     } else if (header instanceof HaugfjellMP3Header) {
                         log.info("Found MP3 header for train_no: {}", analysisId);
-                        return aggregateMetricsForMP3(analysisId, mp3Repository);
+                        return aggregateMetricsForMP3(analysisId);
                     } else {
                         return Mono.error(new IllegalArgumentException("Unknown header type for train_no: " + analysisId));
                     }
                 });
     }
 
-    private Mono<SensorMetricsDTO> aggregateMetricsForMP1(Integer analysisId, HaugfjellMP1AxlesRepository repo) {
-        return Mono.zip(
-                List.of(
-                        repo.findAverageSpeedByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findSpeedVarianceByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageAoaByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVibrationLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVibrationRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVerticalForceLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVerticalForceRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralForceLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralForceRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralVibrationLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralVibrationRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageAxleLoadLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageAxleLoadRightByTrainNo(analysisId).defaultIfEmpty(0.0)
-                ),
-                results -> {
-                    SensorMetricsDTO dto = new SensorMetricsDTO();
-                    dto.setAverageSpeed((Double) results[0]);
-                    dto.setSpeedVariance((Double) results[1]);
-                    dto.setAverageAoa((Double) results[2]);
-                    dto.setAverageVibrationLeft((Double) results[3]);
-                    dto.setAverageVibrationRight((Double) results[4]);
-                    dto.setAverageVerticalForceLeft((Double) results[5]);
-                    dto.setAverageVerticalForceRight((Double) results[6]);
-                    dto.setAverageLateralForceLeft((Double) results[7]);
-                    dto.setAverageLateralForceRight((Double) results[8]);
-                    dto.setAverageLateralVibrationLeft((Double) results[9]);
-                    dto.setAverageLateralVibrationRight((Double) results[10]);
-                    dto.setAverageAxleLoadLeft((Double) results[11]);
-                    dto.setAverageAxleLoadRight((Double) results[12]);
-                    dto.setAnalysisId(analysisId);
-                    return dto;
-                }
+    private Mono<SensorMetricsDTO> aggregateMetricsForMP1(Integer analysisId) {
+        // Compute dynamic aggregations using the new queries (grouped by 'vit')
+        Mono<Double> avgSpeed = mp1Repository.findDynamicSpeedAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgSpeed())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgSpeedSquare = mp1Repository.findDynamicSpeedAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgSquareSpeed())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> speedVariance = avgSpeed.zipWith(avgSpeedSquare, (avg, avgSq) -> avgSq - (avg * avg));
+
+        Mono<Double> avgAoa = mp1Repository.findDynamicAngleAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgAoa())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgVibrationLeft = mp1Repository.findDynamicVibrationLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVibrationLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgVibrationRight = mp1Repository.findDynamicVibrationRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVibrationRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgVerticalForceLeft = mp1Repository.findDynamicVerticalForceLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVerticalForceLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgVerticalForceRight = mp1Repository.findDynamicVerticalForceRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVerticalForceRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgLateralForceLeft = mp1Repository.findDynamicLateralForceLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralForceLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgLateralForceRight = mp1Repository.findDynamicLateralForceRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralForceRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgLateralVibrationLeft = mp1Repository.findDynamicLateralVibrationLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralVibrationLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgLateralVibrationRight = mp1Repository.findDynamicLateralVibrationRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralVibrationRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        // Legacy global queries for axle loads remain unchanged
+        Mono<Double> avgAxleLoadLeft = mp1Repository.findGlobalAverageAxleLoadLeft().defaultIfEmpty(0.0);
+        Mono<Double> avgAxleLoadRight = mp1Repository.findGlobalAverageAxleLoadRight().defaultIfEmpty(0.0);
+
+        List<Mono<Double>> sources = List.of(
+                avgSpeed, speedVariance, avgAoa, avgVibrationLeft, avgVibrationRight,
+                avgVerticalForceLeft, avgVerticalForceRight, avgLateralForceLeft, avgLateralForceRight,
+                avgLateralVibrationLeft, avgLateralVibrationRight, avgAxleLoadLeft, avgAxleLoadRight
         );
+
+        return Mono.zip(sources, results -> {
+            SensorMetricsDTO dto = new SensorMetricsDTO();
+            dto.setAverageSpeed((Double) results[0]);
+            dto.setSpeedVariance((Double) results[1]);
+            dto.setAverageAoa((Double) results[2]);
+            dto.setAverageVibrationLeft((Double) results[3]);
+            dto.setAverageVibrationRight((Double) results[4]);
+            dto.setAverageVerticalForceLeft((Double) results[5]);
+            dto.setAverageVerticalForceRight((Double) results[6]);
+            dto.setAverageLateralForceLeft((Double) results[7]);
+            dto.setAverageLateralForceRight((Double) results[8]);
+            dto.setAverageLateralVibrationLeft((Double) results[9]);
+            dto.setAverageLateralVibrationRight((Double) results[10]);
+            dto.setAverageAxleLoadLeft((Double) results[11]);
+            dto.setAverageAxleLoadRight((Double) results[12]);
+            dto.setAnalysisId(analysisId);
+            return dto;
+        });
     }
 
-    private Mono aggregateMetricsForMP3(Integer analysisId, HaugfjellMP3AxlesRepository repo) {
-        return Mono.zip(
-                List.of(
-                        repo.findAverageSpeedByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findSpeedVarianceByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageAoaByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVibrationLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVibrationRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVerticalForceLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageVerticalForceRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralForceLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralForceRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralVibrationLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageLateralVibrationRightByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageAxleLoadLeftByTrainNo(analysisId).defaultIfEmpty(0.0),
-                        repo.findAverageAxleLoadRightByTrainNo(analysisId).defaultIfEmpty(0.0)
-                ),
-                results -> {
-                    SensorMetricsDTO dto = new SensorMetricsDTO();
-                    dto.setAverageSpeed((Double) results[0]);
-                    dto.setSpeedVariance((Double) results[1]);
-                    dto.setAverageAoa((Double) results[2]);
-                    dto.setAverageVibrationLeft((Double) results[3]);
-                    dto.setAverageVibrationRight((Double) results[4]);
-                    dto.setAverageVerticalForceLeft((Double) results[5]);
-                    dto.setAverageVerticalForceRight((Double) results[6]);
-                    dto.setAverageLateralForceLeft((Double) results[7]);
-                    dto.setAverageLateralForceRight((Double) results[8]);
-                    dto.setAverageLateralVibrationLeft((Double) results[9]);
-                    dto.setAverageLateralVibrationRight((Double) results[10]);
-                    dto.setAverageAxleLoadLeft((Double) results[11]);
-                    dto.setAverageAxleLoadRight((Double) results[12]);
-                    dto.setAnalysisId(analysisId);
-                    return dto;
-                }
+    private Mono<SensorMetricsDTO> aggregateMetricsForMP3(Integer analysisId) {
+        // Dynamic aggregations for MP3 using the same approach as MP1
+        Mono<Double> avgSpeed = mp3Repository.findDynamicSpeedAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgSpeed())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        Mono<Double> avgSpeedSquare = mp3Repository.findDynamicSpeedAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgSquareSpeed())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        Mono<Double> speedVariance = avgSpeed.zipWith(avgSpeedSquare, (avg, avgSq) -> avgSq - (avg * avg));
+
+        Mono<Double> avgAoa = mp3Repository.findDynamicAngleAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgAoa())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgVibrationLeft = mp3Repository.findDynamicVibrationLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVibrationLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        Mono<Double> avgVibrationRight = mp3Repository.findDynamicVibrationRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVibrationRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgVerticalForceLeft = mp3Repository.findDynamicVerticalForceLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVerticalForceLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        Mono<Double> avgVerticalForceRight = mp3Repository.findDynamicVerticalForceRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgVerticalForceRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgLateralForceLeft = mp3Repository.findDynamicLateralForceLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralForceLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        Mono<Double> avgLateralForceRight = mp3Repository.findDynamicLateralForceRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralForceRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgLateralVibrationLeft = mp3Repository.findDynamicLateralVibrationLeftAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralVibrationLeft())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+        Mono<Double> avgLateralVibrationRight = mp3Repository.findDynamicLateralVibrationRightAggregationsByTrainNo(analysisId)
+                .map(agg -> agg.getAvgLateralVibrationRight())
+                .collectList()
+                .map(list -> list.stream().mapToDouble(Double::doubleValue).average().orElse(0.0));
+
+        Mono<Double> avgAxleLoadLeft = mp3Repository.findGlobalAverageAxleLoadLeft().defaultIfEmpty(0.0);
+        Mono<Double> avgAxleLoadRight = mp3Repository.findGlobalAverageAxleLoadRight().defaultIfEmpty(0.0);
+
+        List<Mono<Double>> sources = List.of(
+                avgSpeed, speedVariance, avgAoa, avgVibrationLeft, avgVibrationRight,
+                avgVerticalForceLeft, avgVerticalForceRight, avgLateralForceLeft, avgLateralForceRight,
+                avgLateralVibrationLeft, avgLateralVibrationRight, avgAxleLoadLeft, avgAxleLoadRight
         );
+
+        return Mono.zip(sources, results -> {
+            SensorMetricsDTO dto = new SensorMetricsDTO();
+            dto.setAverageSpeed((Double) results[0]);
+            dto.setSpeedVariance((Double) results[1]);
+            dto.setAverageAoa((Double) results[2]);
+            dto.setAverageVibrationLeft((Double) results[3]);
+            dto.setAverageVibrationRight((Double) results[4]);
+            dto.setAverageVerticalForceLeft((Double) results[5]);
+            dto.setAverageVerticalForceRight((Double) results[6]);
+            dto.setAverageLateralForceLeft((Double) results[7]);
+            dto.setAverageLateralForceRight((Double) results[8]);
+            dto.setAverageLateralVibrationLeft((Double) results[9]);
+            dto.setAverageLateralVibrationRight((Double) results[10]);
+            dto.setAverageAxleLoadLeft((Double) results[11]);
+            dto.setAverageAxleLoadRight((Double) results[12]);
+            dto.setAnalysisId(analysisId);
+            return dto;
+        });
     }
 
     @Override
