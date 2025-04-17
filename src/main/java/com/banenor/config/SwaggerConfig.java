@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
 import io.swagger.v3.oas.annotations.info.Info;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.security.SecurityScheme;
+import io.swagger.v3.oas.annotations.ExternalDocumentation;
 import org.springdoc.core.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,7 +16,11 @@ import org.springframework.context.annotation.Configuration;
                 version = "v1",
                 description = "API documentation for the Predictive Maintenance Backend"
         ),
-        security = {@SecurityRequirement(name = "bearerAuth")}
+        security = @SecurityRequirement(name = "bearerAuth"),
+        externalDocs = @ExternalDocumentation(
+                description = "Actuator Health Endpoint",
+                url = "/actuator/health"
+        )
 )
 @SecurityScheme(
         name = "bearerAuth",

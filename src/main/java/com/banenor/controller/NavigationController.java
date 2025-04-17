@@ -24,12 +24,9 @@ public class NavigationController {
     }
 
     /**
-     * Retrieves the list of navigation items.
-     * Endpoint: GET /api/navigation
-     *
-     * @return Flux of NavigationItem.
+     * Canonical endpoint: GET /api/v1/navigation
      */
-    @GetMapping(value = "/api/navigation", produces = MediaType.APPLICATION_JSON_VALUE)
+    @GetMapping(value = "/api/v1/navigation", produces = MediaType.APPLICATION_JSON_VALUE)
     public Flux<NavigationItem> getNavigationItems() {
         log.info("Fetching navigation items");
         List<NavigationItem> items = Arrays.asList(
