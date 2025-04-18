@@ -2,6 +2,7 @@ package com.banenor.config;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Collections;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -25,13 +26,14 @@ import com.banenor.dto.SensorDataDTO;
 import com.banenor.events.MaintenanceRiskEvent;
 
 import io.micrometer.core.instrument.MeterRegistry;
-import lombok.extern.slf4j.Slf4j;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 
-@Slf4j
+/**
+ * Central Kafka configuration for both imperative (SpringKafka) and reactive (Reactor Kafka) usage.
+ */
 @Configuration
 @EnableKafka
 public class KafkaConfig {
@@ -70,13 +72,14 @@ public class KafkaConfig {
 
     public KafkaConfig(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
-        // Register basic Kafka metrics
+        // Expose basic config via metrics
         meterRegistry.gauge("kafka.config.bootstrap_servers", bootstrapServers, String::length);
         meterRegistry.gauge("kafka.config.consumer_group_id", consumerGroupId, String::length);
         meterRegistry.gauge("kafka.config.sensor_topic", sensorTopic, String::length);
     }
 
-    // Producer for String messages
+    // ------------------ Imperative Kafka Producers ------------------
+
     @Bean
     public Map<String, Object> stringProducerConfigs() {
         Map<String, Object> props = new HashMap<>();
@@ -99,7 +102,6 @@ public class KafkaConfig {
         return new KafkaTemplate<>(stringProducerFactory());
     }
 
-    // Producer for MaintenanceRiskEvent using JSON serialization
     @Bean
     public Map<String, Object> riskEventProducerConfigs() {
         Map<String, Object> props = new HashMap<>();
@@ -123,23 +125,14 @@ public class KafkaConfig {
         return new KafkaTemplate<>(riskEventProducerFactory());
     }
 
-    // Reactive Kafka Sender for MaintenanceRiskEvent
     @Bean
     public KafkaSender<String, MaintenanceRiskEvent> reactiveRiskEventKafkaSender() {
-        Map<String, Object> senderProps = new HashMap<>();
-        senderProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        senderProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        senderProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        senderProps.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
-        senderProps.put(ProducerConfig.ACKS_CONFIG, acks);
-        senderProps.put(ProducerConfig.RETRIES_CONFIG, retries);
-        senderProps.put(ProducerConfig.BATCH_SIZE_CONFIG, batchSize);
-        
-        SenderOptions<String, MaintenanceRiskEvent> senderOptions = SenderOptions.create(senderProps);
+        SenderOptions<String, MaintenanceRiskEvent> senderOptions = SenderOptions.create(riskEventProducerConfigs());
         return KafkaSender.create(senderOptions);
     }
 
-    // Consumer Configuration for String messages
+    // ------------------ Imperative Kafka Consumer ------------------
+
     @Bean
     public Map<String, Object> consumerConfigs() {
         Map<String, Object> props = new HashMap<>();
@@ -147,7 +140,7 @@ public class KafkaConfig {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        // VALUE_DESERIALIZER will be set by SpringKafka
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, enableAutoCommit);
         props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
@@ -169,65 +162,45 @@ public class KafkaConfig {
         return factory;
     }
 
-    // Reactive Kafka Receiver for SensorDataDTO
+    // ------------------ Reactive Kafka Receiver ------------------
+
     @Bean
     public KafkaReceiver<String, SensorDataDTO> sensorDataKafkaReceiver() {
         validateConfiguration();
 
-        Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        // Base props + JSON deserialization settings
+        Map<String, Object> props = new HashMap<>(consumerConfigs());
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, SensorDataDTO.class.getName());
         props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.banenor.dto");
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, enableAutoCommit);
-        props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
+        props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
 
-        // Add metrics
-        props.put(ConsumerConfig.METRIC_REPORTER_CLASSES_CONFIG, 
-                "org.apache.kafka.common.metrics.MetricsReporter");
-        props.put(ConsumerConfig.METRICS_NUM_SAMPLES_CONFIG, "2");
-        props.put(ConsumerConfig.METRICS_SAMPLE_WINDOW_MS_CONFIG, "30000");
+        JsonDeserializer<SensorDataDTO> sensorDeserializer = new JsonDeserializer<>(SensorDataDTO.class, false);
+        sensorDeserializer.addTrustedPackages("com.banenor.dto");
 
         ReceiverOptions<String, SensorDataDTO> receiverOptions = ReceiverOptions.<String, SensorDataDTO>create(props)
-                .subscription(java.util.Collections.singletonList(sensorTopic));
-
-        // Add error handling and monitoring
-        receiverOptions = receiverOptions
-                .commitInterval(java.time.Duration.ofSeconds(5))
-                .commitBatchSize(100)
-                .maxCommitAttempts(3)
-                .commitRetryInterval(java.time.Duration.ofSeconds(1));
+                .withKeyDeserializer(new StringDeserializer())
+                .withValueDeserializer(sensorDeserializer)
+                .subscription(Collections.singletonList(sensorTopic));
 
         return KafkaReceiver.create(receiverOptions);
     }
 
     private void validateConfiguration() {
         if (!StringUtils.hasText(bootstrapServers)) {
-            meterRegistry.counter("kafka.config.validation.errors", "type", "bootstrap_servers").increment();
+            meterRegistry.counter("kafka.config.validation.errors", "param", "bootstrapServers").increment();
             throw new IllegalStateException("Kafka bootstrap servers must be configured");
         }
         if (!StringUtils.hasText(consumerGroupId)) {
-            meterRegistry.counter("kafka.config.validation.errors", "type", "consumer_group_id").increment();
+            meterRegistry.counter("kafka.config.validation.errors", "param", "consumerGroupId").increment();
             throw new IllegalStateException("Kafka consumer group ID must be configured");
         }
         if (!StringUtils.hasText(sensorTopic)) {
-            meterRegistry.counter("kafka.config.validation.errors", "type", "sensor_topic").increment();
+            meterRegistry.counter("kafka.config.validation.errors", "param", "sensorTopic").increment();
             throw new IllegalStateException("Kafka sensor topic must be configured");
         }
         if (maxPollRecords <= 0) {
-            meterRegistry.counter("kafka.config.validation.errors", "type", "max_poll_records").increment();
+            meterRegistry.counter("kafka.config.validation.errors", "param", "maxPollRecords").increment();
             throw new IllegalStateException("Kafka max poll records must be positive");
-        }
-        if (batchSize <= 0) {
-            meterRegistry.counter("kafka.config.validation.errors", "type", "batch_size").increment();
-            throw new IllegalStateException("Kafka batch size must be positive");
-        }
-        if (retries < 0) {
-            meterRegistry.counter("kafka.config.validation.errors", "type", "retries").increment();
-            throw new IllegalStateException("Kafka retries must be non-negative");
         }
     }
 }

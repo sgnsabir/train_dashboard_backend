@@ -11,7 +11,6 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.common.TopicPartition;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -35,11 +34,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RequiredArgsConstructor
 public class SensorDataConsumer {
 
+    private final KafkaReceiver<String, SensorDataDTO> kafkaReceiver;
     private final DataService dataService;
     private final RealtimeAlertService alertService;
     private final MeterRegistry meterRegistry;
     private final ObjectMapper objectMapper;
-    private final KafkaReceiver<String, SensorDataDTO> kafkaReceiver;
 
     @Value("${kafka.sensor.topic}")
     private String sensorTopic;
@@ -92,9 +91,7 @@ public class SensorDataConsumer {
     @EventListener(ApplicationStartedEvent.class)
     public void startConsumer() {
         if (isRunning.compareAndSet(false, true)) {
-            // consume and process in batches
-            kafkaReceiver
-                    .receive()
+            kafkaReceiver.receive()
                     .publishOn(Schedulers.boundedElastic())
                     .bufferTimeout(batchSize, Duration.ofSeconds(5))
                     .flatMap(records -> Flux.fromIterable(records).flatMap(this::processRecord))
@@ -102,24 +99,13 @@ public class SensorDataConsumer {
                     .doOnNext(v -> healthy.set(true))
                     .retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
                             .maxBackoff(Duration.ofMinutes(5))
-                            .doBeforeRetry(sig -> {
+                            .doBeforeRetry(signal -> {
                                 healthy.set(false);
-                                lastError = sig.failure();
+                                lastError = signal.failure();
                             }))
                     .subscribe();
 
-            // track partition assignments
-            kafkaReceiver
-                    .receive()
-                    .map(rec -> rec.receiverOffset().topicPartition())
-                    .distinct()
-                    .doOnNext(tp -> meterRegistry.counter("kafka.partition.assignments",
-                                    "topic", tp.topic(),
-                                    "partition", String.valueOf(tp.partition()))
-                            .increment())
-                    .subscribe();
-
-            isRunning.set(true);
+            log.info("Started Kafka sensor‐data consumer for topic {}", sensorTopic);
         }
     }
 
@@ -150,67 +136,60 @@ public class SensorDataConsumer {
 
     private Mono<Void> processRecord(ReceiverRecord<String, SensorDataDTO> record) {
         return processingTimer.record(() -> {
-            SensorDataDTO data = record.value();
-            if (data == null) {
+            SensorDataDTO sensorData = record.value();
+            if (sensorData == null) {
                 return Mono.empty();
             }
 
             meterRegistry.counter("sensor.data.received",
-                            "sensor_id", data.getSensorId(),
-                            "train_no", String.valueOf(data.getTrainNo()))
+                            "sensor_id", sensorData.getSensorId(),
+                            "train_no", String.valueOf(sensorData.getTrainNo()))
                     .increment();
 
             return Mono.defer(() -> {
-                        String json;
+                        String payload;
                         try {
-                            json = objectMapper.writeValueAsString(data);
+                            payload = objectMapper.writeValueAsString(sensorData);
                         } catch (JsonProcessingException e) {
-                            log.error("Serialization error: {}", e.getMessage(), e);
+                            log.error("Failed to serialize sensor data: {}", e.getMessage(), e);
                             return Mono.empty();
                         }
 
-                        Mono<Void> m = dataService.processSensorData(json)
-                                .onErrorResume(e -> {
-                                    log.error("Processing error: {}", e.getMessage(), e);
-                                    return Mono.empty();
-                                });
+                        Mono<Void> maintenance = dataService.processSensorData(payload)
+                                .onErrorResume(e -> Mono.empty());
 
-                        Mono<Void> a = alertService.monitorAndAlert(data.getTrainNo(), defaultAlertEmail)
-                                .onErrorResume(e -> {
-                                    log.error("Alerting error: {}", e.getMessage(), e);
-                                    return Mono.empty();
-                                });
+                        Mono<Void> alert = alertService.monitorAndAlert(sensorData.getTrainNo(), defaultAlertEmail)
+                                .onErrorResume(e -> Mono.empty());
 
-                        return Mono.when(m, a);
+                        return Mono.when(maintenance, alert);
                     })
                     .timeout(Duration.ofSeconds(30))
                     .retryWhen(Retry.backoff(maxRetryAttempts, Duration.ofMillis(retryDelayMs)))
                     .doOnSuccess(v -> acknowledge(record))
-                    .doOnError(e -> handleProcessingError(record, e));
+                    .doOnError(e -> handlingProcessingError(record, e));
         });
     }
 
     private void acknowledge(ReceiverRecord<String, SensorDataDTO> record) {
         ReceiverOffset offset = record.receiverOffset();
         offset.acknowledge();
-        var tp = offset.topicPartition();
         meterRegistry.counter("sensor.data.processed",
-                        "topic", tp.topic(),
-                        "partition", String.valueOf(tp.partition()))
+                        "partition", String.valueOf(record.partition()),
+                        "topic", record.topic())
                 .increment();
     }
 
-    private void handleProcessingError(ReceiverRecord<String, SensorDataDTO> record, Throwable error) {
-        var tp = record.receiverOffset().topicPartition();
+    private void handlingProcessingError(ReceiverRecord<String, SensorDataDTO> record, Throwable error) {
         meterRegistry.counter("sensor.data.processing.failures",
-                        "topic", tp.topic(),
-                        "partition", String.valueOf(tp.partition()),
+                        "topic", record.topic(),
                         "error", error.getClass().getSimpleName())
                 .increment();
-        log.error("Error processing {}-{}: {}", tp.topic(), tp.partition(), error.getMessage());
+        log.error("Error processing record {}@{}: {}",
+                record.topic(), record.partition(), error.getMessage(), error);
     }
 
     private void handleConsumerError(Throwable error) {
+        healthy.set(false);
         meterRegistry.counter("sensor.data.consumer.errors",
                         "error", error.getClass().getSimpleName())
                 .increment();

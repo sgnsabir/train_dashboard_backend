@@ -2,71 +2,63 @@ package com.banenor.controller;
 
 import com.banenor.dto.DerailmentRiskDTO;
 import com.banenor.service.DerailmentRiskService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeParseException;
 
+@Slf4j
 @RestController
 @RequestMapping(value = "/api/v1/derailment", produces = MediaType.APPLICATION_JSON_VALUE)
-@Slf4j
+@Tag(name = "Derailment Risk", description = "Analyze derailment risk over time ranges")
+@PreAuthorize("hasRole('MAINTENANCE')")
 @RequiredArgsConstructor
 public class DerailmentRiskController {
 
     private final DerailmentRiskService derailmentRiskService;
 
-    /**
-     * Retrieves derailment risk analysis data for the specified train and time range.
-     *
-     * Example endpoint:
-     * GET /api/v1/derailment?trainNo=123&startDate=2025-01-01T00:00:00&endDate=2025-01-08T00:00:00
-     *
-     * @param trainNo   the train number identifier
-     * @param startDate optional start date in ISO-8601 format (defaults to now minus 7 days)
-     * @param endDate   optional end date in ISO-8601 format (defaults to now)
-     * @return a Flux stream of DerailmentRiskDTO objects representing analyzed sensor data
-     */
+    @Operation(
+            summary = "Get Derailment Risk",
+            description = "Retrieve derailment risk data for a given train and time range"
+    )
     @GetMapping
     public Flux<DerailmentRiskDTO> getDerailmentRiskData(
-            @RequestParam("trainNo") Integer trainNo,
+            @RequestParam("trainNo") @Min(1) Integer trainNo,
             @RequestParam(value = "startDate", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) String startDate,
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam(value = "endDate", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) String endDate) {
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
 
-        LocalDateTime start = parseOrDefault(startDate, LocalDateTime.now().minusDays(7));
-        LocalDateTime end = parseOrDefault(endDate, LocalDateTime.now());
+        LocalDateTime end = endDate != null ? endDate : LocalDateTime.now();
+        LocalDateTime start = startDate != null ? startDate : end.minusDays(7);
 
-        log.info("Fetching derailment risk data for trainNo={} from {} to {}", trainNo, start, end);
+        if (start.isAfter(end)) {
+            log.warn("startDate {} is after endDate {}", startDate, endDate);
+            throw new ResponseStatusException(
+                    org.springframework.http.HttpStatus.BAD_REQUEST,
+                    "startDate must be before endDate"
+            );
+        }
+
+        log.info("Fetching derailment risk for trainNo={} from {} to {}", trainNo, start, end);
 
         return derailmentRiskService.fetchDerailmentRiskData(trainNo, start, end)
-                .doOnError(ex -> log.error("Error fetching derailment risk data for trainNo {}: {}", trainNo, ex.getMessage(), ex))
+                .doOnError(ex -> log.error(
+                        "Error fetching derailment risk for trainNo {}: {}", trainNo, ex.getMessage(), ex
+                ))
                 .subscribeOn(Schedulers.boundedElastic());
-    }
-
-    /**
-     * Helper method to parse an ISO-8601 date/time string.
-     * Returns the default value if parsing fails or the input is null/empty.
-     *
-     * @param dateTimeStr  the date/time string to parse
-     * @param defaultValue the default LocalDateTime to use if parsing fails
-     * @return the parsed LocalDateTime or the default value
-     */
-    private LocalDateTime parseOrDefault(String dateTimeStr, LocalDateTime defaultValue) {
-        if (dateTimeStr == null || dateTimeStr.trim().isEmpty()) {
-            return defaultValue;
-        }
-        try {
-            return LocalDateTime.parse(dateTimeStr);
-        } catch (DateTimeParseException e) {
-            log.warn("Failed to parse date/time '{}', falling back to default value {}", dateTimeStr, defaultValue);
-            return defaultValue;
-        }
     }
 }

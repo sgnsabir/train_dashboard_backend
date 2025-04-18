@@ -3,58 +3,52 @@ package com.banenor.controller;
 import com.banenor.dto.TrackConditionDTO;
 import com.banenor.service.TrackConditionService;
 import com.banenor.util.DateTimeUtils;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
-
 import java.time.LocalDateTime;
 
-/**
- * Controller for track condition analysis.
- * Retrieves track condition data for a given train number and date range,
- * and analyzes lateral and vertical forces.
- */
 @RestController
 @RequestMapping(value = "/api/v1/track", produces = MediaType.APPLICATION_JSON_VALUE)
 @Slf4j
 @RequiredArgsConstructor
 @Tag(name = "Track Condition", description = "Endpoints for track condition analysis")
+@Validated
+@PreAuthorize("hasRole('MAINTENANCE')")
 public class TrackConditionController {
 
     private final TrackConditionService trackConditionService;
 
-    /**
-     * Retrieves track condition data for the specified train number within a given date range.
-     * If the startDate and/or endDate parameters are missing or invalid, defaults to the last 7 days.
-     * Example endpoint:
-     * GET /api/v1/track?trainNo=123&startDate=2025-01-01T00:00:00&endDate=2025-01-08T00:00:00
-     *
-     * @param trainNo   the train number.
-     * @param startDate optional ISO-8601 formatted start date/time.
-     * @param endDate   optional ISO-8601 formatted end date/time.
-     * @return a Flux of TrackConditionDTO objects.
-     */
+    @Operation(
+            summary = "Get Track Condition",
+            description = "Retrieve lateral and vertical force metrics for a given train over a specified time range."
+    )
     @GetMapping
     public Flux<TrackConditionDTO> getTrackConditionData(
-            @RequestParam("trainNo") Integer trainNo,
-            @RequestParam(value = "startDate", required = false) String startDate,
-            @RequestParam(value = "endDate", required = false) String endDate) {
+            @RequestParam("trainNo") @Min(1) Integer trainNo,
+            @RequestParam(value = "startDate", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) String startDate,
+            @RequestParam(value = "endDate", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) String endDate) {
 
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime defaultStart = now.minusDays(7);
-        LocalDateTime defaultEnd = now;
+        LocalDateTime from = DateTimeUtils.parseOrDefault(startDate, now.minusDays(7));
+        LocalDateTime to   = DateTimeUtils.parseOrDefault(endDate, now);
 
-        LocalDateTime start = DateTimeUtils.parseOrDefault(startDate, defaultStart);
-        LocalDateTime end = DateTimeUtils.parseOrDefault(endDate, defaultEnd);
+        log.info("Fetching track condition for trainNo={} from {} to {}", trainNo, from, to);
 
-        log.info("Fetching track condition data for trainNo={} from {} to {}", trainNo, start, end);
-
-        return trackConditionService.fetchTrackConditionData(trainNo, start, end)
-                .doOnError(ex -> log.error("Error fetching track condition data: {}", ex.getMessage(), ex))
+        return trackConditionService
+                .fetchTrackConditionData(trainNo, from, to)
+                .doOnError(ex -> log.error("Error fetching track condition for trainNo={}: {}", trainNo, ex.getMessage(), ex))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 }

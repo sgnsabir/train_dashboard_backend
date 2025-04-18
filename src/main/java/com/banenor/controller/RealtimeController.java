@@ -42,10 +42,6 @@ public class RealtimeController {
     private final Optional<SimpMessagingTemplate> messagingTemplate;
     private final MeterRegistry meterRegistry;
 
-    /**
-     * Alias for /api/v1/predictive/{analysisId}.
-     * Retrieves predictive maintenance insights.
-     */
     @Operation(
             summary = "Get Latest Realtime Metrics",
             description = "Alias to fetch predictive maintenance insights for a given analysis ID"
@@ -78,9 +74,6 @@ public class RealtimeController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /**
-     * Evaluates realtime thresholds and sends alerts if needed.
-     */
     @Operation(
             summary = "Trigger Realtime Alert",
             description = "Evaluate sensors against realtime thresholds and notify if any exceed limits"
@@ -119,9 +112,6 @@ public class RealtimeController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /**
-     * Streams predictive maintenance updates every 5 seconds via SSE.
-     */
     @Operation(
             summary = "Stream Realtime Metrics (SSE)",
             description = "Continuously stream predictive maintenance updates every 5 seconds"
