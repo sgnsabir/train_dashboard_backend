@@ -3,11 +3,6 @@ package com.banenor.service;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.banenor.dto.AnalysisHeaderDTO;
 import com.banenor.dto.AnalysisMeasurementDTO;
 import com.banenor.dto.RawDataResponse;
@@ -19,17 +14,18 @@ import com.banenor.mapper.HaugfjellMP3Mapper;
 import com.banenor.mapper.RawDataResponseFilter;
 import com.banenor.mapper.SensorMeasurementMapper;
 import com.banenor.model.AbstractAxles;
-import com.banenor.model.HaugfjellMP1Header;
-import com.banenor.model.HaugfjellMP3Header;
 import com.banenor.repository.HaugfjellMP1AxlesRepository;
 import com.banenor.repository.HaugfjellMP1HeaderRepository;
 import com.banenor.repository.HaugfjellMP3AxlesRepository;
 import com.banenor.repository.HaugfjellMP3HeaderRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -49,44 +45,45 @@ public class DataServiceImpl implements DataService {
     private final MeterRegistry meterRegistry;
     private final Timer processingTimer;
     private final HaugfjellMP1HeaderRepository mp1HeaderRepo;
-    private final HaugfjellMP1AxlesRepository mp1AxlesRepo;
+    private final HaugfjellMP1AxlesRepository    mp1AxlesRepo;
     private final HaugfjellMP3HeaderRepository mp3HeaderRepo;
-    private final HaugfjellMP3AxlesRepository mp3AxlesRepo;
-    private final HaugfjellMP1Mapper mp1Mapper;
-    private final HaugfjellMP3Mapper mp3Mapper;
-    private final DashboardService dashboardService;
-    private final DigitalTwinService digitalTwinService;
-    private final AxleMapper axleMapper;
-    private final RawDataResponseFilter rawDataResponseFilter;
-    private final SensorMeasurementMapper sensorMeasurementMapper;
+    private final HaugfjellMP3AxlesRepository    mp3AxlesRepo;
+    private final HaugfjellMP1Mapper             mp1Mapper;
+    private final HaugfjellMP3Mapper             mp3Mapper;
+    private final DashboardService               dashboardService;
+    private final DigitalTwinService             digitalTwinService;
+    private final AxleMapper                     axleMapper;
+    private final RawDataResponseFilter          rawDataResponseFilter;
+    private final SensorMeasurementMapper        sensorMeasurementMapper;
 
-    public DataServiceImpl(HaugfjellMP1HeaderRepository mp1HeaderRepo,
-                           HaugfjellMP1AxlesRepository mp1AxlesRepo,
-                           HaugfjellMP3HeaderRepository mp3HeaderRepo,
-                           HaugfjellMP3AxlesRepository mp3AxlesRepo,
-                           AxleMapper axleMapper,
-                           RawDataResponseFilter rawDataResponseFilter,
-                           SensorMeasurementMapper sensorMeasurementMapper,
-                           HaugfjellMP1Mapper mp1Mapper,
-                           HaugfjellMP3Mapper mp3Mapper,
-                           DigitalTwinService digitalTwinService,
-                           DashboardService dashboardService,
-                           MeterRegistry meterRegistry) {
-        this.mp1HeaderRepo = mp1HeaderRepo;
-        this.mp1AxlesRepo = mp1AxlesRepo;
-        this.mp3HeaderRepo = mp3HeaderRepo;
-        this.mp3AxlesRepo = mp3AxlesRepo;
-        this.axleMapper = axleMapper;
-        this.rawDataResponseFilter = rawDataResponseFilter;
+    public DataServiceImpl(
+            HaugfjellMP1HeaderRepository mp1HeaderRepo,
+            HaugfjellMP1AxlesRepository mp1AxlesRepo,
+            HaugfjellMP3HeaderRepository mp3HeaderRepo,
+            HaugfjellMP3AxlesRepository mp3AxlesRepo,
+            AxleMapper axleMapper,
+            RawDataResponseFilter rawDataResponseFilter,
+            SensorMeasurementMapper sensorMeasurementMapper,
+            HaugfjellMP1Mapper mp1Mapper,
+            HaugfjellMP3Mapper mp3Mapper,
+            DigitalTwinService digitalTwinService,
+            DashboardService dashboardService,
+            MeterRegistry meterRegistry
+    ) {
+        this.mp1HeaderRepo           = mp1HeaderRepo;
+        this.mp1AxlesRepo            = mp1AxlesRepo;
+        this.mp3HeaderRepo           = mp3HeaderRepo;
+        this.mp3AxlesRepo            = mp3AxlesRepo;
+        this.axleMapper              = axleMapper;
+        this.rawDataResponseFilter   = rawDataResponseFilter;
         this.sensorMeasurementMapper = sensorMeasurementMapper;
-        this.mp1Mapper = mp1Mapper;
-        this.mp3Mapper = mp3Mapper;
-        this.digitalTwinService = digitalTwinService;
-        this.dashboardService = dashboardService;
-        this.meterRegistry = meterRegistry;
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
-        this.processingTimer = Timer.builder("sensor.data.processing")
+        this.mp1Mapper               = mp1Mapper;
+        this.mp3Mapper               = mp3Mapper;
+        this.dashboardService        = dashboardService;
+        this.digitalTwinService      = digitalTwinService;
+        this.meterRegistry           = meterRegistry;
+        this.objectMapper            = new ObjectMapper().registerModule(new JavaTimeModule());
+        this.processingTimer         = Timer.builder("sensor.data.processing")
                 .description("Time taken to process sensor data")
                 .publishPercentiles(0.5, 0.95, 0.99)
                 .register(meterRegistry);
@@ -100,11 +97,10 @@ public class DataServiceImpl implements DataService {
 
             return Mono.fromCallable(() -> objectMapper.readValue(message, SensorDataPayload.class))
                     .flatMap(payload -> {
-                        var headerDTO = payload.getHeader();
+                        var headerDTO      = payload.getHeader();
                         var measurementDTO = payload.getMeasurement();
-                        String mplace = headerDTO.getMplace();
+                        String mplace      = headerDTO.getMplace();
 
-                        // Validate input
                         if (mplace == null || mplace.trim().isEmpty()) {
                             meterRegistry.counter("sensor.data.validation.errors", "type", "missing_mplace").increment();
                             return Mono.error(new IllegalArgumentException("Measurement station (mplace) is null or empty"));
@@ -115,18 +111,15 @@ public class DataServiceImpl implements DataService {
                             return Mono.empty();
                         }
 
-                        // Process based on measurement place
-                        Mono<Integer> trainNoMono;
-                        if (mplace.equalsIgnoreCase("MP1")) {
-                            trainNoMono = processMP1Data(headerDTO, measurementDTO);
-                        } else if (mplace.equalsIgnoreCase("MP3")) {
-                            trainNoMono = processMP3Data(headerDTO, measurementDTO);
-                        } else {
-                            meterRegistry.counter("sensor.data.validation.errors", "type", "invalid_mplace").increment();
-                            return Mono.error(new IllegalArgumentException("Unknown measurement station: " + mplace));
-                        }
+                        Mono<Integer> trainNoMono = switch (mplace.toUpperCase()) {
+                            case "MP1" -> processMP1Data(headerDTO, measurementDTO);
+                            case "MP3" -> processMP3Data(headerDTO, measurementDTO);
+                            default   -> {
+                                meterRegistry.counter("sensor.data.validation.errors", "type", "invalid_mplace").increment();
+                                yield Mono.error(new IllegalArgumentException("Unknown measurement station: " + mplace));
+                            }
+                        };
 
-                        // Update digital twin and process metrics
                         return trainNoMono
                                 .flatMap(trainNo -> dashboardService.getLatestMetrics(trainNo)
                                         .doOnNext(metrics -> meterRegistry.counter("sensor.data.metrics.updated").increment())
@@ -134,15 +127,12 @@ public class DataServiceImpl implements DataService {
                                                 .doOnSuccess(v -> meterRegistry.counter("digital.twin.updated").increment())))
                                 .timeout(PROCESSING_TIMEOUT)
                                 .retryWhen(Retry.backoff(MAX_RETRY_ATTEMPTS, RETRY_DELAY)
-                                        .doBeforeRetry(signal -> 
-                                            logger.warn("Retrying after error: {}", signal.failure().getMessage())))
+                                        .doBeforeRetry(sig -> logger.warn("Retrying after error: {}", sig.failure().getMessage())))
                                 .then();
                     })
                     .onErrorResume(ex -> {
                         logger.error("Failed to process sensor data: {}", ex.getMessage(), ex);
-                        meterRegistry.counter("sensor.data.errors", 
-                                "type", ex.getClass().getSimpleName()).increment();
-                        // Send to dead-letter queue in production
+                        meterRegistry.counter("sensor.data.errors", "type", ex.getClass().getSimpleName()).increment();
                         logger.info("Message sent to dead-letter topic: {}", DEAD_LETTER_TOPIC);
                         return Mono.empty();
                     })
@@ -153,31 +143,29 @@ public class DataServiceImpl implements DataService {
     private Mono<Integer> processMP1Data(AnalysisHeaderDTO headerDTO, AnalysisMeasurementDTO measurementDTO) {
         return mp1HeaderRepo.findByMstartTime(headerDTO.getMstartTime())
                 .switchIfEmpty(Mono.defer(() -> {
-                    HaugfjellMP1Header newHeader = mp1Mapper.headerDtoToEntity(headerDTO);
+                    var newHeader = mp1Mapper.headerDtoToEntity(headerDTO);
                     if (newHeader.getTrainNo() == null) {
                         newHeader.setTrainNo(HEADER_ID_GENERATOR.getAndIncrement());
                     }
                     return mp1HeaderRepo.save(newHeader);
                 }))
-                .flatMap(header -> mp1AxlesRepo.save(mp1Mapper.measurementDtoToEntity(measurementDTO, header))
-                        .thenReturn(header.getTrainNo()))
-                .doOnSuccess(trainNo -> meterRegistry.counter("sensor.data.processed", 
-                        "type", "MP1").increment());
+                .flatMap(h -> mp1AxlesRepo.save(mp1Mapper.measurementDtoToEntity(measurementDTO, h))
+                        .thenReturn(h.getTrainNo()))
+                .doOnSuccess(n -> meterRegistry.counter("sensor.data.processed", "type", "MP1").increment());
     }
 
     private Mono<Integer> processMP3Data(AnalysisHeaderDTO headerDTO, AnalysisMeasurementDTO measurementDTO) {
         return mp3HeaderRepo.findByMstartTime(headerDTO.getMstartTime())
                 .switchIfEmpty(Mono.defer(() -> {
-                    HaugfjellMP3Header newHeader = mp3Mapper.headerDtoToEntity(headerDTO);
+                    var newHeader = mp3Mapper.headerDtoToEntity(headerDTO);
                     if (newHeader.getTrainNo() == null) {
                         newHeader.setTrainNo(HEADER_ID_GENERATOR.getAndIncrement());
                     }
                     return mp3HeaderRepo.save(newHeader);
                 }))
-                .flatMap(header -> mp3AxlesRepo.save(mp3Mapper.measurementDtoToEntity(measurementDTO, header))
-                        .thenReturn(header.getTrainNo()))
-                .doOnSuccess(trainNo -> meterRegistry.counter("sensor.data.processed", 
-                        "type", "MP3").increment());
+                .flatMap(h -> mp3AxlesRepo.save(mp3Mapper.measurementDtoToEntity(measurementDTO, h))
+                        .thenReturn(h.getTrainNo()))
+                .doOnSuccess(n -> meterRegistry.counter("sensor.data.processed", "type", "MP3").increment());
     }
 
     @Override
@@ -192,28 +180,26 @@ public class DataServiceImpl implements DataService {
         meterRegistry.counter("raw.data.requests").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
 
-        return Flux.defer(() -> {
-            Flux<AbstractAxles> axlesFlux = mp1HeaderRepo.findById(analysisId)
-                    .flatMapMany(header -> mp1AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class))
-                    .switchIfEmpty(mp3HeaderRepo.findById(analysisId)
-                            .flatMapMany(header -> mp3AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class)))
-                    .switchIfEmpty(Flux.empty());
+        Flux<AbstractAxles> axlesFlux = mp1HeaderRepo.findById(analysisId)
+                .flatMapMany(h -> mp1AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class))
+                .switchIfEmpty(mp3HeaderRepo.findById(analysisId)
+                        .flatMapMany(h -> mp3AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class)))
+                .switchIfEmpty(Flux.empty());
 
-            return axlesFlux
-                    .map(entity -> axleMapper.toRawDataResponse(entity))
-                    .map(dto -> rawDataResponseFilter.filter(dto, sensorType))
-                    .skip(page * size)
-                    .take(size)
-                    .doOnComplete(() -> {
-                        sample.stop(meterRegistry.timer("raw.data.processing.time"));
-                        meterRegistry.counter("raw.data.success").increment();
-                    })
-                    .doOnError(e -> {
-                        meterRegistry.counter("raw.data.errors", 
-                                "type", e.getClass().getSimpleName()).increment();
-                        logger.error("Error retrieving raw data: {}", e.getMessage(), e);
-                    });
-        }).subscribeOn(Schedulers.boundedElastic());
+        return axlesFlux
+                .map(axleMapper::toRawDataResponse)
+                .map(dto -> rawDataResponseFilter.filter(dto, sensorType))
+                .skip((long) page * size)
+                .take(size)
+                .doOnComplete(() -> {
+                    sample.stop(meterRegistry.timer("raw.data.processing.time"));
+                    meterRegistry.counter("raw.data.success").increment();
+                })
+                .doOnError(e -> {
+                    meterRegistry.counter("raw.data_errors", "type", e.getClass().getSimpleName()).increment();
+                    logger.error("Error retrieving raw data: {}", e.getMessage(), e);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     @Override
@@ -228,26 +214,24 @@ public class DataServiceImpl implements DataService {
         meterRegistry.counter("detailed.data.requests").increment();
         Timer.Sample sample = Timer.start(meterRegistry);
 
-        return Flux.defer(() -> {
-            Flux<AbstractAxles> axlesFlux = mp1HeaderRepo.findById(analysisId)
-                    .flatMapMany(header -> mp1AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class))
-                    .switchIfEmpty(mp3HeaderRepo.findById(analysisId)
-                            .flatMapMany(header -> mp3AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class)))
-                    .switchIfEmpty(Flux.empty());
+        Flux<AbstractAxles> axlesFlux = mp1HeaderRepo.findById(analysisId)
+                .flatMapMany(h -> mp1AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class))
+                .switchIfEmpty(mp3HeaderRepo.findById(analysisId)
+                        .flatMapMany(h -> mp3AxlesRepo.findByTrainNo(analysisId).cast(AbstractAxles.class)))
+                .switchIfEmpty(Flux.empty());
 
-            return axlesFlux
-                    .map(sensorMeasurementMapper::toSensorMeasurementDTO)
-                    .skip(page * size)
-                    .take(size)
-                    .doOnComplete(() -> {
-                        sample.stop(meterRegistry.timer("detailed.data.processing.time"));
-                        meterRegistry.counter("detailed.data.success").increment();
-                    })
-                    .doOnError(e -> {
-                        meterRegistry.counter("detailed.data.errors", 
-                                "type", e.getClass().getSimpleName()).increment();
-                        logger.error("Error retrieving detailed sensor data: {}", e.getMessage(), e);
-                    });
-        }).subscribeOn(Schedulers.boundedElastic());
+        return axlesFlux
+                .map(sensorMeasurementMapper::toSensorMeasurementDTO)
+                .skip((long) page * size)
+                .take(size)
+                .doOnComplete(() -> {
+                    sample.stop(meterRegistry.timer("detailed.data.processing.time"));
+                    meterRegistry.counter("detailed.data.success").increment();
+                })
+                .doOnError(e -> {
+                    meterRegistry.counter("detailed.data.errors", "type", e.getClass().getSimpleName()).increment();
+                    logger.error("Error retrieving detailed sensor data: {}", e.getMessage(), e);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 }

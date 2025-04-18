@@ -1,138 +1,112 @@
 package com.banenor.service;
 
-import java.time.LocalDateTime;
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
-
-import org.springframework.stereotype.Service;
-
 import com.banenor.dto.AxlesDataDTO;
 import com.banenor.model.AbstractAxles;
 import com.banenor.repository.HaugfjellMP1AxlesRepository;
 import com.banenor.repository.HaugfjellMP3AxlesRepository;
-
+import com.banenor.util.RepositoryResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
+import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
+
+import java.beans.PropertyDescriptor;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AxlesDataService {
 
-    private final HaugfjellMP1AxlesRepository mp1Repository;
-    private final HaugfjellMP3AxlesRepository mp3Repository;
+    private final RepositoryResolver repositoryResolver;
+
+    // matches fields like spdTp1, aoaTp2, vviblTp3, vvibrTp4, vfrclTp2, etc.
+    private static final Pattern TP_FIELD =
+            Pattern.compile("^(spd|aoa|vvibl|vvibr|vfrcl|vfrcr|lfrcl|lfrcr|lvibl|lvibr)Tp(\\d+)$");
 
     /**
-     * Retrieves axles data for a specific train number and time range, with measurement point type.
-     *
-     * @param trainNo the train number
-     * @param start the start time
-     * @param end the end time
-     * @param measurementPoint optional measurement point type ("MP1" or "MP3")
-     * @return Flux of AxlesDataDTO
+     * Retrieves axles data for a specific train number and time range,
+     * emitting one AxlesDataDTO per test‑point found on each record.
      */
-    public Flux<AxlesDataDTO> getAxlesData(Integer trainNo, LocalDateTime start, LocalDateTime end, String measurementPoint) {
-        if (measurementPoint != null && !measurementPoint.isEmpty()) {
-            return getAxlesDataByType(trainNo, start, end, measurementPoint);
+    public Flux<AxlesDataDTO> getAxlesData(Integer trainNo,
+                                           LocalDateTime start,
+                                           LocalDateTime end,
+                                           String measurementPoint) {
+        return repositoryResolver.resolveRepository(trainNo)
+                .flatMapMany(repo -> {
+                    Flux<AbstractAxles> axleFlux;
+                    if (repo instanceof HaugfjellMP1AxlesRepository) {
+                        HaugfjellMP1AxlesRepository mp1 = (HaugfjellMP1AxlesRepository) repo;
+                        axleFlux = mp1.findByTrainNoAndCreatedAtBetween(trainNo, start, end)
+                                .cast(AbstractAxles.class);
+                    } else if (repo instanceof HaugfjellMP3AxlesRepository) {
+                        HaugfjellMP3AxlesRepository mp3 = (HaugfjellMP3AxlesRepository) repo;
+                        axleFlux = mp3.findByTrainNoAndCreatedAtBetween(trainNo, start, end)
+                                .cast(AbstractAxles.class);
+                    } else {
+                        return Flux.error(new IllegalArgumentException(
+                                "Unsupported repository for trainNo=" + trainNo));
+                    }
+
+                    return axleFlux
+                            .flatMap(axle -> mapToAllTp(axle, measurementPoint));
+                })
+                .onErrorResume(ex -> {
+                    log.error("Error streaming axles data for train {}: {}", trainNo, ex.getMessage(), ex);
+                    return Flux.empty();
+                });
+    }
+
+    /**
+     * Reflects on one AbstractAxles instance, discovers all Tp‑suffix fields,
+     * groups them by Tp index, and builds one DTO per Tp.
+     */
+    private Flux<AxlesDataDTO> mapToAllTp(AbstractAxles axle, String measurementPoint) {
+        BeanWrapper wrapper = new BeanWrapperImpl(axle);
+        Map<Integer, AxlesDataDTO.AxlesDataDTOBuilder> builders = new TreeMap<>();
+
+        for (PropertyDescriptor pd : wrapper.getPropertyDescriptors()) {
+            String name = pd.getName();
+            Matcher m = TP_FIELD.matcher(name);
+            if (!m.matches()) continue;
+
+            String prop = m.group(1);
+            int tpIndex = Integer.parseInt(m.group(2));
+            Object raw = wrapper.getPropertyValue(name);
+            Double val = (raw instanceof Number) ? ((Number) raw).doubleValue() : null;
+
+            AxlesDataDTO.AxlesDataDTOBuilder b = builders.computeIfAbsent(tpIndex, idx ->
+                    AxlesDataDTO.builder()
+                            .trainNo(axle.getHeader() != null ? axle.getHeader().getTrainNo() : null)
+                            .measurementPoint(measurementPoint + ":TP" + idx)
+                            .createdAt(axle.getCreatedAt())
+            );
+
+            switch (prop) {
+                case "spd"   -> b.speed(val);
+                case "aoa"   -> b.angleOfAttack(val);
+                case "vvibl" -> b.vibrationLeft(val);
+                case "vvibr" -> b.vibrationRight(val);
+                case "vfrcl" -> b.verticalForceLeft(val);
+                case "vfrcr" -> b.verticalForceRight(val);
+                case "lfrcl" -> b.lateralForceLeft(val);
+                case "lfrcr" -> b.lateralForceRight(val);
+                case "lvibl" -> b.lateralVibrationLeft(val);
+                case "lvibr" -> b.lateralVibrationRight(val);
+            }
         }
-        
-        // If no measurement point specified, return data from both
-        return Flux.merge(
-            getAxlesDataByType(trainNo, start, end, "MP1"),
-            getAxlesDataByType(trainNo, start, end, "MP3")
+
+        return Flux.fromIterable(
+                builders.values().stream()
+                        .map(AxlesDataDTO.AxlesDataDTOBuilder::build)
+                        .collect(Collectors.toList())
         );
     }
-
-    private Flux<AxlesDataDTO> getAxlesDataByType(Integer trainNo, LocalDateTime start, LocalDateTime end, String type) {
-        return switch (type.toUpperCase()) {
-            case "MP1" -> mp1Repository.findByTrainNoAndCreatedAtBetween(trainNo, start, end)
-                    .map(axle -> mapToDTO(axle, "MP1"));
-            case "MP3" -> mp3Repository.findByTrainNoAndCreatedAtBetween(trainNo, start, end)
-                    .map(axle -> mapToDTO(axle, "MP3"));
-            default -> Flux.error(new IllegalArgumentException("Invalid measurement point type: " + type));
-        };
-    }
-
-    /**
-     * Gets global aggregation data for a specific measurement point type.
-     *
-     * @param type the measurement point type ("MP1" or "MP3")
-     * @return Mono containing the aggregated data
-     */
-    public Mono<AxlesDataDTO> getGlobalAggregations(String type) {
-        return switch (type.toUpperCase()) {
-            case "MP1" -> Mono.zip(
-                List.of(
-                    mp1Repository.findGlobalAverageSpeed(),
-                    mp1Repository.findGlobalAverageAoa(),
-                    mp1Repository.findGlobalAverageVibrationLeft(),
-                    mp1Repository.findGlobalAverageVibrationRight(),
-                    mp1Repository.findGlobalAverageVerticalForceLeft(),
-                    mp1Repository.findGlobalAverageVerticalForceRight(),
-                    mp1Repository.findGlobalAverageLateralForceLeft(),
-                    mp1Repository.findGlobalAverageLateralForceRight(),
-                    mp1Repository.findGlobalAverageLateralVibrationLeft(),
-                    mp1Repository.findGlobalAverageLateralVibrationRight()
-                ),
-                results -> buildAggregationDTO(Arrays.stream(results)
-                    .map(obj -> (Double) obj)
-                    .collect(Collectors.toList()), "MP1")
-            );
-            case "MP3" -> Mono.zip(
-                List.of(
-                    mp3Repository.findGlobalAverageSpeed(),
-                    mp3Repository.findGlobalAverageAoa(),
-                    mp3Repository.findGlobalAverageVibrationLeft(),
-                    mp3Repository.findGlobalAverageVibrationRight(),
-                    mp3Repository.findGlobalAverageVerticalForceLeft(),
-                    mp3Repository.findGlobalAverageVerticalForceRight(),
-                    mp3Repository.findGlobalAverageLateralForceLeft(),
-                    mp3Repository.findGlobalAverageLateralForceRight(),
-                    mp3Repository.findGlobalAverageLateralVibrationLeft(),
-                    mp3Repository.findGlobalAverageLateralVibrationRight()
-                ),
-                results -> buildAggregationDTO(Arrays.stream(results)
-                    .map(obj -> (Double) obj)
-                    .collect(Collectors.toList()), "MP3")
-            );
-            default -> Mono.error(new IllegalArgumentException("Invalid measurement point type: " + type));
-        };
-    }
-
-    private AxlesDataDTO buildAggregationDTO(List<Double> results, String type) {
-        return AxlesDataDTO.builder()
-                .speed(results.get(0))
-                .angleOfAttack(results.get(1))
-                .vibrationLeft(results.get(2))
-                .vibrationRight(results.get(3))
-                .verticalForceLeft(results.get(4))
-                .verticalForceRight(results.get(5))
-                .lateralForceLeft(results.get(6))
-                .lateralForceRight(results.get(7))
-                .lateralVibrationLeft(results.get(8))
-                .lateralVibrationRight(results.get(9))
-                .measurementPoint(type)
-                .build();
-    }
-
-    private AxlesDataDTO mapToDTO(AbstractAxles axle, String measurementPoint) {
-        return AxlesDataDTO.builder()
-                .trainNo(axle.getHeader() != null ? axle.getHeader().getTrainNo() : null)
-                .speed(axle.getSpdTp1())
-                .angleOfAttack(axle.getAoaTp1())
-                .vibrationLeft(axle.getVviblTp1())
-                .vibrationRight(axle.getVvibrTp1())
-                .verticalForceLeft(axle.getVfrclTp1())
-                .verticalForceRight(axle.getVfrcrTp1())
-                .lateralForceLeft(axle.getLfrclTp1())
-                .lateralForceRight(axle.getLfrcrTp1())
-                .lateralVibrationLeft(axle.getLviblTp1())
-                .lateralVibrationRight(axle.getLvibrTp1())
-                .createdAt(axle.getCreatedAt())
-                .measurementPoint(measurementPoint)
-                .build();
-    }
-} 
+}

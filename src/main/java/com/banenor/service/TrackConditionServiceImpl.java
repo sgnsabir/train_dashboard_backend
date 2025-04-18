@@ -3,18 +3,25 @@ package com.banenor.service;
 import com.banenor.config.InsightsProperties;
 import com.banenor.dto.TrackConditionDTO;
 import com.banenor.model.AbstractAxles;
-import com.banenor.model.HaugfjellMP1Header;
-import com.banenor.model.HaugfjellMP3Header;
 import com.banenor.repository.HaugfjellMP1AxlesRepository;
 import com.banenor.repository.HaugfjellMP3AxlesRepository;
 import com.banenor.util.RepositoryResolver;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+
+import java.beans.PropertyDescriptor;
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -25,17 +32,20 @@ public class TrackConditionServiceImpl implements TrackConditionService {
     private final RepositoryResolver repositoryResolver;
     private final InsightsProperties insightsProperties;
 
+    // Matches only the 4 fields we care about, for any Tp index
+    private static final Pattern TP_FIELD = Pattern.compile("^(lfrcl|lfrcr|vfrcl|vfrcr)Tp(\\d+)$");
+
     @PostConstruct
     public void init() {
-        log.info("TrackConditionService initialized with high lateral force threshold: {} and high vertical force threshold: {}",
-                insightsProperties.getTrack().getHighLateralForce(), insightsProperties.getTrack().getHighVerticalForce());
+        log.info("TrackConditionService initialized with lateral threshold={} and vertical threshold={}",
+                insightsProperties.getTrack().getHighLateralForce(),
+                insightsProperties.getTrack().getHighVerticalForce());
     }
 
     @Override
     public Flux<TrackConditionDTO> fetchTrackConditionData(Integer trainNo, LocalDateTime start, LocalDateTime end) {
         return repositoryResolver.resolveRepository(trainNo)
                 .flatMapMany(repo -> {
-                    // Since repo is a R2dbcRepository<?> without custom methods, we need to cast it
                     if (repo instanceof HaugfjellMP1AxlesRepository) {
                         return ((HaugfjellMP1AxlesRepository) repo).findByTrainNoAndCreatedAtBetween(trainNo, start, end);
                     } else if (repo instanceof HaugfjellMP3AxlesRepository) {
@@ -44,75 +54,87 @@ public class TrackConditionServiceImpl implements TrackConditionService {
                         return Flux.empty();
                     }
                 })
-                .map(this::analyzeRecord)
+                .flatMap(this::mapToDynamicTp)
                 .doOnError(ex -> log.error("Error in track condition analysis: {}", ex.getMessage(), ex));
     }
 
     /**
-     * Analyzes a single sensor record to detect high lateral and vertical forces.
-     * <p>
-     * Evaluates:
-     * <ul>
-     *   <li>Lateral forces: Checks if the absolute value of left (lfrcl_tp1) or right (lfrcr_tp1) exceeds the configured threshold.</li>
-     *   <li>Vertical forces: Checks if the absolute value of left (vfrcl_tp1) or right (vfrcr_tp1) exceeds the configured threshold.</li>
-     * </ul>
-     * </p>
-     *
-     * @param record a sensor record.
-     * @return a populated TrackConditionDTO with analysis results.
+     * Splits one AbstractAxles record into one DTO per Tp index by reflection.
      */
-    private TrackConditionDTO analyzeRecord(AbstractAxles record) {
-        // Retrieve lateral forces (using representative tp1 columns)
-        double lateralForceLeft = record.getLfrclTp1() != null ? Math.abs(record.getLfrclTp1()) : 0.0;
-        double lateralForceRight = record.getLfrcrTp1() != null ? Math.abs(record.getLfrcrTp1()) : 0.0;
+    private Flux<TrackConditionDTO> mapToDynamicTp(AbstractAxles record) {
+        BeanWrapper wrapper = new BeanWrapperImpl(record);
+        Map<Integer, Map<String, Double>> tpMap = new TreeMap<>();
 
-        // Retrieve vertical forces (using representative tp1 columns)
-        double verticalForceLeft = record.getVfrclTp1() != null ? Math.abs(record.getVfrclTp1()) : 0.0;
-        double verticalForceRight = record.getVfrcrTp1() != null ? Math.abs(record.getVfrcrTp1()) : 0.0;
+        // Collect per‑Tp values
+        for (PropertyDescriptor pd : wrapper.getPropertyDescriptors()) {
+            String name = pd.getName();
+            Matcher m = TP_FIELD.matcher(name);
+            if (!m.matches()) continue;
 
-        // Thresholds from configuration
-        double highLateralThreshold = insightsProperties.getTrack().getHighLateralForce();
-        double highVerticalThreshold = insightsProperties.getTrack().getHighVerticalForce();
+            String prop = m.group(1);           // e.g. "lfrcl"
+            int tp = Integer.parseInt(m.group(2)); // e.g. 1,2,...
 
-        // Determine if the forces exceed thresholds
-        boolean isHighLateral = lateralForceLeft > highLateralThreshold || lateralForceRight > highLateralThreshold;
-        boolean isHighVertical = verticalForceLeft > highVerticalThreshold || verticalForceRight > highVerticalThreshold;
+            Object raw = wrapper.getPropertyValue(name);
+            double val = (raw instanceof Number)
+                    ? Math.abs(((Number) raw).doubleValue())
+                    : 0.0;
 
-        // Build anomaly message
-        StringBuilder anomalyMessage = new StringBuilder();
-        if (isHighLateral) {
-            if (lateralForceLeft > highLateralThreshold) {
-                anomalyMessage.append(String.format("Left lateral force (%.2f) exceeds threshold (%.2f). ", lateralForceLeft, highLateralThreshold));
-            }
-            if (lateralForceRight > highLateralThreshold) {
-                anomalyMessage.append(String.format("Right lateral force (%.2f) exceeds threshold (%.2f). ", lateralForceRight, highLateralThreshold));
-            }
-        }
-        if (isHighVertical) {
-            if (verticalForceLeft > highVerticalThreshold) {
-                anomalyMessage.append(String.format("Left vertical force (%.2f) exceeds threshold (%.2f). ", verticalForceLeft, highVerticalThreshold));
-            }
-            if (verticalForceRight > highVerticalThreshold) {
-                anomalyMessage.append(String.format("Right vertical force (%.2f) exceeds threshold (%.2f).", verticalForceRight, highVerticalThreshold));
-            }
-        }
-        if (!isHighLateral && !isHighVertical) {
-            anomalyMessage.append("Track conditions are within normal parameters.");
+            tpMap.computeIfAbsent(tp, k -> new HashMap<>()).put(prop, val);
         }
 
-        // Resolve train number from the header if available
-        Integer resolvedTrainNo = record.getHeader() != null ? record.getHeader().getTrainNo() : null;
+        return Flux.fromIterable(tpMap.entrySet())
+                .map(entry -> {
+                    int tp = entry.getKey();
+                    Map<String, Double> vals = entry.getValue();
 
-        return TrackConditionDTO.builder()
-                .trainNo(resolvedTrainNo)
-                .measurementTime(record.getCreatedAt())
-                .lateralForceLeft(lateralForceLeft)
-                .lateralForceRight(lateralForceRight)
-                .verticalForceLeft(verticalForceLeft)
-                .verticalForceRight(verticalForceRight)
-                .highLateralForce(isHighLateral)
-                .highVerticalForce(isHighVertical)
-                .anomalyMessage(anomalyMessage.toString().trim())
-                .build();
+                    double lateralLeft   = vals.getOrDefault("lfrcl", 0.0);
+                    double lateralRight  = vals.getOrDefault("lfrcr", 0.0);
+                    double verticalLeft  = vals.getOrDefault("vfrcl", 0.0);
+                    double verticalRight = vals.getOrDefault("vfrcr", 0.0);
+
+                    double latThr = insightsProperties.getTrack().getHighLateralForce();
+                    double vertThr = insightsProperties.getTrack().getHighVerticalForce();
+
+                    boolean highLat  = lateralLeft  > latThr || lateralRight  > latThr;
+                    boolean highVert = verticalLeft > vertThr || verticalRight > vertThr;
+
+                    StringBuilder anomaly = new StringBuilder();
+                    if (highLat) {
+                        if (lateralLeft > latThr)
+                            anomaly.append(String.format("Left lateral force (%.2f) exceeds threshold (%.2f). ",
+                                    lateralLeft, latThr));
+                        if (lateralRight > latThr)
+                            anomaly.append(String.format("Right lateral force (%.2f) exceeds threshold (%.2f). ",
+                                    lateralRight, latThr));
+                    }
+                    if (highVert) {
+                        if (verticalLeft > vertThr)
+                            anomaly.append(String.format("Left vertical force (%.2f) exceeds threshold (%.2f). ",
+                                    verticalLeft, vertThr));
+                        if (verticalRight > vertThr)
+                            anomaly.append(String.format("Right vertical force (%.2f) exceeds threshold (%.2f).",
+                                    verticalRight, vertThr));
+                    }
+                    if (!highLat && !highVert) {
+                        anomaly.append("Track conditions are within normal parameters.");
+                    }
+
+                    Integer resolvedTrainNo = (record.getHeader() != null)
+                            ? record.getHeader().getTrainNo()
+                            : null;
+
+                    return TrackConditionDTO.builder()
+                            .trainNo(resolvedTrainNo)
+                            .measurementTime(record.getCreatedAt())
+                            .measurementPoint("TP" + tp)
+                            .lateralForceLeft(lateralLeft)
+                            .lateralForceRight(lateralRight)
+                            .verticalForceLeft(verticalLeft)
+                            .verticalForceRight(verticalRight)
+                            .highLateralForce(highLat)
+                            .highVerticalForce(highVert)
+                            .anomalyMessage(anomaly.toString().trim())
+                            .build();
+                });
     }
 }

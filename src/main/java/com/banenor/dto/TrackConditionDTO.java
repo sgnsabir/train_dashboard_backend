@@ -6,13 +6,6 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-/**
- * Data Transfer Object for Track Condition Analysis.
- * This DTO encapsulates sensor measurements related to track forces.
- * It includes the train number, measurement time, lateral forces (left and right),
- * vertical forces (left and right), and flags indicating if high lateral or vertical forces were detected.
- * Additionally, it provides an anomaly message to detail any threshold breaches.
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -23,6 +16,11 @@ public class TrackConditionDTO {
      * Train number associated with the sensor record.
      */
     private Integer trainNo;
+
+    /**
+     * Label for the measurement point, e.g. "TP1", "TP2", etc.
+     */
+    private String measurementPoint;
 
     /**
      * Timestamp when the sensor measurement was recorded.

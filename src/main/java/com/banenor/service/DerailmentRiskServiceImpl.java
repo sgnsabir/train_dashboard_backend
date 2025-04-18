@@ -1,33 +1,27 @@
 package com.banenor.service;
 
-import java.time.LocalDateTime;
-import java.util.Optional;
-
-import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.stereotype.Service;
-
 import com.banenor.config.InsightsProperties;
 import com.banenor.dto.DerailmentRiskDTO;
 import com.banenor.model.AbstractAxles;
 import com.banenor.repository.HaugfjellMP1AxlesRepository;
 import com.banenor.repository.HaugfjellMP3AxlesRepository;
 import com.banenor.util.RepositoryResolver;
-
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
-/**
- * Implementation of the DerailmentRiskService.
- *
- * This service fetches sensor data for a given train number and time range using a RepositoryResolver,
- * then analyzes each record to flag potential derailment risks based on:
- * <ul>
- *   <li>Vibration spikes – if the maximum of left/right vertical vibrations exceeds a configured threshold.</li>
- *   <li>Time delay differences – if the absolute difference between left and right time delays exceeds a threshold.</li>
- * </ul>
- */
+import java.beans.PropertyDescriptor;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -36,6 +30,9 @@ public class DerailmentRiskServiceImpl implements DerailmentRiskService {
 
     private final RepositoryResolver repositoryResolver;
     private final InsightsProperties insightsProperties;
+
+    // matches vviblTpN, vvibrTpN, dtlTpN, dtrTpN
+    private static final Pattern TP_FIELD = Pattern.compile("^(vvibl|vvibr|dtl|dtr)Tp(\\d+)$");
 
     @PostConstruct
     public void init() {
@@ -48,71 +45,90 @@ public class DerailmentRiskServiceImpl implements DerailmentRiskService {
     public Flux<DerailmentRiskDTO> fetchDerailmentRiskData(Integer trainNo, LocalDateTime start, LocalDateTime end) {
         return repositoryResolver.resolveRepository(trainNo)
                 .flatMapMany(repo -> {
-                    if (repo instanceof HaugfjellMP1AxlesRepository) {
-                        return ((HaugfjellMP1AxlesRepository) repo)
-                                .findByTrainNoAndCreatedAtBetween(trainNo, start, end);
-                    } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                        return ((HaugfjellMP3AxlesRepository) repo)
-                                .findByTrainNoAndCreatedAtBetween(trainNo, start, end);
+                    Flux<AbstractAxles> axleFlux;
+                    if (repo instanceof HaugfjellMP1AxlesRepository mp1) {
+                        axleFlux = mp1.findByTrainNoAndCreatedAtBetween(trainNo, start, end).cast(AbstractAxles.class);
+                    } else if (repo instanceof HaugfjellMP3AxlesRepository mp3) {
+                        axleFlux = mp3.findByTrainNoAndCreatedAtBetween(trainNo, start, end).cast(AbstractAxles.class);
                     } else {
-                        return Flux.error(new IllegalArgumentException("Repository type not recognized"));
+                        return Flux.error(new IllegalArgumentException("Unsupported repository for trainNo=" + trainNo));
                     }
+                    return axleFlux;
                 })
-                .map(this::analyzeRecord)
-                .doOnError(ex -> log.error("Error in derailment risk analysis: {}", ex.getMessage(), ex));
+                .flatMap(this::mapToAllTp)
+                .doOnError(e -> log.error("Error in derailment risk analysis: {}", e.getMessage(), e));
     }
 
-    /**
-     * Analyzes a single sensor record to detect derailment risk.
-     *
-     * Checks include:
-     * <ul>
-     *   <li>Vibration Spike – evaluates the maximum vertical vibration (left/right)
-     *       against the configured vibration threshold.</li>
-     *   <li>Time Delay Difference – calculates the absolute difference between
-     *       left and right time delays and compares it with the configured threshold.</li>
-     * </ul>
-     *
-     * @param record a sensor record.
-     * @return a populated DerailmentRiskDTO reflecting the analysis.
-     */
-    private DerailmentRiskDTO analyzeRecord(AbstractAxles record) {
-        double vibrationLeft = Optional.ofNullable(record.getVviblTp1()).orElse(0.0);
-        double vibrationRight = Optional.ofNullable(record.getVvibrTp1()).orElse(0.0);
-        double maxVibration = Math.max(vibrationLeft, vibrationRight);
+    private Flux<DerailmentRiskDTO> mapToAllTp(AbstractAxles axle) {
+        BeanWrapper wrapper = new BeanWrapperImpl(axle);
+        Map<Integer, BuilderHolder> holders = new TreeMap<>();
 
-        double timeDelayLeft = Optional.ofNullable(record.getDtlTp1()).orElse(0.0);
-        double timeDelayRight = Optional.ofNullable(record.getDtrTp1()).orElse(0.0);
-        double timeDelayDifference = Math.abs(timeDelayLeft - timeDelayRight);
+        for (PropertyDescriptor pd : wrapper.getPropertyDescriptors()) {
+            Matcher m = TP_FIELD.matcher(pd.getName());
+            if (!m.matches()) continue;
 
-        boolean vibrationRisk = maxVibration > insightsProperties.getDerailment().getVibrationThreshold();
-        boolean timeDelayRisk = timeDelayDifference > insightsProperties.getDerailment().getTimeDelayThreshold();
-        boolean riskDetected = vibrationRisk || timeDelayRisk;
+            String prop = m.group(1);           // vvibl, vvibr, dtl, dtr
+            int tpIdx   = Integer.parseInt(m.group(2));
+            Object raw  = wrapper.getPropertyValue(pd.getName());
+            double val  = (raw instanceof Number) ? ((Number) raw).doubleValue() : 0.0;
 
-        StringBuilder anomalyMessage = new StringBuilder();
-        if (vibrationRisk) {
-            anomalyMessage.append(String.format("Vibration (%.2f) exceeds threshold (%.2f). ",
-                    maxVibration, insightsProperties.getDerailment().getVibrationThreshold()));
-        }
-        if (timeDelayRisk) {
-            anomalyMessage.append(String.format("Time delay difference (%.2f) exceeds threshold (%.2f).",
-                    timeDelayDifference, insightsProperties.getDerailment().getTimeDelayThreshold()));
-        }
-        if (!riskDetected) {
-            anomalyMessage.append("Normal operation.");
+            // init holder for this Tp if absent
+            BuilderHolder h = holders.computeIfAbsent(tpIdx, idx -> {
+                DerailmentRiskDTO.DerailmentRiskDTOBuilder bb = DerailmentRiskDTO.builder()
+                        .trainNo(axle.getHeader() != null
+                                ? axle.getHeader().getTrainNo()
+                                : null)
+                        .measurementTime(axle.getCreatedAt());
+                return new BuilderHolder(bb);
+            });
+
+            switch (prop) {
+                case "vvibl" -> h.vibrationLeft = val;
+                case "vvibr" -> h.vibrationRight = val;
+                case "dtl"   -> h.delayLeft      = val;
+                case "dtr"   -> h.delayRight     = val;
+            }
         }
 
-        Integer resolvedTrainNo = (record.getHeader() != null) ? record.getHeader().getTrainNo() : null;
+        return Flux.fromIterable(
+                holders.values().stream().map(h -> {
+                    double maxVib = Math.max(h.vibrationLeft, h.vibrationRight);
+                    double diff   = Math.abs(h.delayLeft - h.delayRight);
 
-        return DerailmentRiskDTO.builder()
-                .trainNo(resolvedTrainNo)
-                .measurementTime(record.getCreatedAt())
-                .vibrationLeft(vibrationLeft)
-                .vibrationRight(vibrationRight)
-                .maxVibration(maxVibration)
-                .timeDelayDifference(timeDelayDifference)
-                .riskDetected(riskDetected)
-                .anomalyMessage(anomalyMessage.toString().trim())
-                .build();
+                    boolean vibRisk = maxVib > insightsProperties.getDerailment().getVibrationThreshold();
+                    boolean dtRisk  = diff   > insightsProperties.getDerailment().getTimeDelayThreshold();
+                    boolean detected = vibRisk || dtRisk;
+
+                    StringBuilder msg = new StringBuilder();
+                    if (vibRisk) msg.append(
+                            String.format("Vibration (%.2f) exceeds threshold (%.2f). ",
+                                    maxVib, insightsProperties.getDerailment().getVibrationThreshold())
+                    );
+                    if (dtRisk) msg.append(
+                            String.format("Time‑delay difference (%.2f) exceeds threshold (%.2f).",
+                                    diff, insightsProperties.getDerailment().getTimeDelayThreshold())
+                    );
+                    if (!detected) msg.append("Normal operation.");
+
+                    return h.builder
+                            .vibrationLeft(h.vibrationLeft)
+                            .vibrationRight(h.vibrationRight)
+                            .maxVibration(maxVib)
+                            .timeDelayDifference(diff)
+                            .riskDetected(detected)
+                            .anomalyMessage(msg.toString().trim())
+                            .build();
+                }).toList()
+        );
+    }
+
+    /** Helper to hold raw tp values before building the DTO. */
+    private static class BuilderHolder {
+        final DerailmentRiskDTO.DerailmentRiskDTOBuilder builder;
+        double vibrationLeft  = 0.0;
+        double vibrationRight = 0.0;
+        double delayLeft      = 0.0;
+        double delayRight     = 0.0;
+        BuilderHolder(DerailmentRiskDTO.DerailmentRiskDTOBuilder b) { this.builder = b; }
     }
 }

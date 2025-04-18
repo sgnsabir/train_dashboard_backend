@@ -1,58 +1,36 @@
 package com.banenor.mapper;
 
 import com.banenor.dto.RawDataResponse;
+import org.springframework.beans.BeanWrapper;
+import org.springframework.beans.BeanWrapperImpl;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 @Component
 public class RawDataResponseFilter {
 
+    /**
+     * If sensorType is blank, returns the full DTO.
+     * Otherwise returns a DTO containing only analysisId, createdAt, sensorType and the matching value.
+     * Supports any field name from RawDataResponse (e.g. "spdTp1", "vviblTp5", etc.).
+     */
     public RawDataResponse filter(RawDataResponse dto, String sensorType) {
         if (!StringUtils.hasText(sensorType)) {
             return dto;
         }
+
         RawDataResponse filtered = new RawDataResponse();
         filtered.setAnalysisId(dto.getAnalysisId());
-        switch (sensorType.trim().toLowerCase()) {
-            case "speed":
-                filtered.setSpdTp1(dto.getSpdTp1());
-                break;
-            case "verticalforceleft":
-                filtered.setVfrclTp1(dto.getVfrclTp1());
-                break;
-            case "verticalforceright":
-                filtered.setVfrcrTp1(dto.getVfrcrTp1());
-                break;
-            case "aoa":
-                filtered.setAoaTp1(dto.getAoaTp1());
-                break;
-            case "vibrationleft":
-                filtered.setVviblTp1(dto.getVviblTp1());
-                break;
-            case "vibrationright":
-                filtered.setVvibrTp1(dto.getVvibrTp1());
-                break;
-            case "lateralforceleft":
-                filtered.setLfrclTp1(dto.getLfrclTp1());
-                break;
-            case "lateralforceright":
-                filtered.setLfrcrTp1(dto.getLfrcrTp1());
-                break;
-            case "lateralvibrationleft":
-                filtered.setLviblTp1(dto.getLviblTp1());
-                break;
-            case "lateralvibrationright":
-                filtered.setLvibrTp1(dto.getLvibrTp1());
-                break;
-            case "longitudinalleft":
-                filtered.setLnglTp1(dto.getLnglTp1());
-                break;
-            case "longitudinalright":
-                filtered.setLngrTp1(dto.getLngrTp1());
-                break;
-            default:
-                return dto;
+        filtered.setCreatedAt(dto.getCreatedAt());
+        filtered.setSensorType(sensorType.trim());
+
+        // dynamically read the matching property (field names match sensorType exactly)
+        BeanWrapper wrapper = new BeanWrapperImpl(dto);
+        Object raw = wrapper.getPropertyValue(sensorType.trim());
+        if (raw instanceof Number) {
+            filtered.setValue(((Number) raw).doubleValue());
         }
+
         return filtered;
     }
 }
