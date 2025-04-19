@@ -1,14 +1,20 @@
 package com.banenor.dto;
 
-import java.time.LocalDateTime;
-
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
+
+import java.time.LocalDateTime;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class AxlesDataDTO {
     private Integer trainNo;
+    private String measurementPoint;
+    private LocalDateTime createdAt;
     private Double speed;
     private Double angleOfAttack;
     private Double vibrationLeft;
@@ -19,6 +25,4 @@ public class AxlesDataDTO {
     private Double lateralForceRight;
     private Double lateralVibrationLeft;
     private Double lateralVibrationRight;
-    private LocalDateTime createdAt;
-    private String measurementPoint; // "MP1" or "MP3"
-} 
+}
