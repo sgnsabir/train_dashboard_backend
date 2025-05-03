@@ -10,16 +10,20 @@ import com.banenor.exception.UserAlreadyExistsException;
 import com.banenor.exception.UserNotFoundException;
 import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
-import com.banenor.security.JwtUtil;
+import com.banenor.security.JwtTokenUtil;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
 import java.util.Date;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -29,18 +33,18 @@ public class AuthServiceImpl implements AuthService {
     private final ReactiveUserDetailsService userDetailsService;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final JwtUtil jwtUtil;
+    private final JwtTokenUtil jwtTokenUtil;
 
     public AuthServiceImpl(ReactiveAuthenticationManager authenticationManager,
                            ReactiveUserDetailsService userDetailsService,
                            UserRepository userRepository,
                            PasswordEncoder passwordEncoder,
-                           JwtUtil jwtUtil) {
+                           JwtTokenUtil jwtTokenUtil) {
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
-        this.jwtUtil = jwtUtil;
+        this.jwtTokenUtil = jwtTokenUtil;
     }
 
     @Override
@@ -68,8 +72,7 @@ public class AuthServiceImpl implements AuthService {
     @Audit(action = "User Login", resource = "Authentication")
     public Mono<LoginResponse> login(LoginRequest loginRequest) {
         return authenticationManager.authenticate(
-                        new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
-                                loginRequest.getUsername(), loginRequest.getPassword()))
+                        new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()))
                 .onErrorMap(BadCredentialsException.class,
                         ex -> new InvalidCredentialsException("Incorrect username or password", ex))
                 .switchIfEmpty(Mono.error(new InvalidCredentialsException("Incorrect username or password")))
@@ -77,10 +80,13 @@ public class AuthServiceImpl implements AuthService {
                 .flatMap(username ->
                         userDetailsService.findByUsername(username)
                                 .map(userDetails -> {
-                                    String roles = userDetails.getAuthorities().toString();
-                                    String token = jwtUtil.generateToken(userDetails.getUsername(), roles);
-                                    // Extract the token's expiration date and compute remaining seconds.
-                                    Date expirationDate = jwtUtil.getExpirationDateFromToken(token);
+                                    List<String> roles = userDetails.getAuthorities().stream()
+                                            .map(grantedAuthority -> grantedAuthority.getAuthority())
+                                            .collect(Collectors.toList());
+
+                                    String token = jwtTokenUtil.generateToken(userDetails.getUsername(), roles);
+
+                                    Date expirationDate = jwtTokenUtil.getExpirationDateFromToken(token);
                                     long expiresIn = (expirationDate.getTime() - System.currentTimeMillis()) / 1000;
 
                                     LoginResponse response = new LoginResponse();
@@ -96,7 +102,7 @@ public class AuthServiceImpl implements AuthService {
     @Audit(action = "User Logout", resource = "Authentication")
     public Mono<Void> logout(String token) {
         log.info("Logging out token: {}", token);
-        // Implement token blacklisting or other logout logic as needed.
+        // Token blacklisting or session management can be added here.
         return Mono.empty();
     }
 

@@ -5,20 +5,19 @@ import com.banenor.dto.UserResponse;
 import com.banenor.dto.UserUpdateRequest;
 import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collections;
+import java.util.List;
 
 @Service
+@RequiredArgsConstructor
 public class UserService {
 
     private final UserRepository userRepository;
-
-    public UserService(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
 
     public Mono<UserResponse> getUserById(Long id) {
         return userRepository.findById(id)
@@ -37,16 +36,46 @@ public class UserService {
 
     public Mono<UserResponse> updateUser(Long id, UserUpdateRequest request) {
         return userRepository.findById(id)
-                .flatMap(user -> {
-                    user.setUsername(request.getUsername());
-                    user.setEmail(request.getEmail());
-                    return userRepository.save(user);
+                .flatMap(existingUser -> {
+                    if (request.getUsername() != null && !request.getUsername().trim().isEmpty()) {
+                        existingUser.setUsername(request.getUsername().trim());
+                    }
+                    if (request.getEmail() != null && !request.getEmail().trim().isEmpty()) {
+                        existingUser.setEmail(request.getEmail().trim());
+                    }
+                    return userRepository.save(existingUser);
                 })
                 .map(this::mapToUserResponse);
     }
 
     public Mono<Void> deleteUser(Long id) {
         return userRepository.deleteById(id);
+    }
+
+    public Mono<UserResponse> updateProfile(String username, ProfileController.ProfileUpdateRequest request) {
+        return userRepository.findByUsername(username)
+                .flatMap(existingUser -> {
+                    if (request.getEmail() != null && !request.getEmail().trim().isEmpty()) {
+                        existingUser.setEmail(request.getEmail().trim());
+                    }
+                    if (request.getAvatar() != null && !request.getAvatar().trim().isEmpty()) {
+                        existingUser.setAvatar(request.getAvatar().trim());
+                    }
+                    if (request.getPhone() != null && !request.getPhone().trim().isEmpty()) {
+                        existingUser.setPhone(request.getPhone().trim());
+                    }
+                    return userRepository.save(existingUser);
+                })
+                .map(this::mapToUserResponse);
+    }
+
+    public Mono<UserResponse> updateAvatar(Long userId, String avatarUrl) {
+        return userRepository.findById(userId)
+                .flatMap(existingUser -> {
+                    existingUser.setAvatar(avatarUrl);
+                    return userRepository.save(existingUser);
+                })
+                .map(this::mapToUserResponse);
     }
 
     private UserResponse mapToUserResponse(User user) {
@@ -56,51 +85,15 @@ public class UserService {
         response.setEmail(user.getEmail());
         response.setAvatar(user.getAvatar());
         response.setPhone(user.getPhone());
-        // Convert the single role string into a singleton list
-        response.setRoles(Collections.singletonList(user.getRole()));
+        response.setTwoFactorEnabled(user.getTwoFactorEnabled());
         response.setCreatedAt(user.getCreatedAt());
         response.setUpdatedAt(user.getUpdatedAt());
+
+        List<String> roles = user.getRole() != null
+                ? Collections.singletonList(user.getRole())
+                : Collections.emptyList();
+        response.setRoles(roles);
+
         return response;
-    }
-
-    /**
-     * Updates the profile of the currently authenticated user.
-     * Only allowed fields (email, avatar, and phone) are updated.
-     *
-     * @param username the username of the current user
-     * @param request  the profile update request containing new email, avatar, and phone
-     * @return a Mono emitting the updated UserResponse
-     */
-    public Mono<UserResponse> updateProfile(String username, ProfileController.ProfileUpdateRequest request) {
-        return userRepository.findByUsername(username)
-                .flatMap(user -> {
-                    if (request.getEmail() != null && !request.getEmail().trim().isEmpty()) {
-                        user.setEmail(request.getEmail());
-                    }
-                    if (request.getAvatar() != null && !request.getAvatar().trim().isEmpty()) {
-                        user.setAvatar(request.getAvatar());
-                    }
-                    if (request.getPhone() != null && !request.getPhone().trim().isEmpty()) {
-                        user.setPhone(request.getPhone());
-                    }
-                    return userRepository.save(user);
-                })
-                .map(this::mapToUserResponse);
-    }
-
-    /**
-     * Updates the avatar URL of the user with the given userId.
-     *
-     * @param userId    the user's ID.
-     * @param avatarUrl the new avatar URL.
-     * @return a Mono emitting the updated UserResponse.
-     */
-    public Mono<UserResponse> updateAvatar(Long userId, String avatarUrl) {
-        return userRepository.findById(userId)
-                .flatMap(user -> {
-                    user.setAvatar(avatarUrl);
-                    return userRepository.save(user);
-                })
-                .map(this::mapToUserResponse);
     }
 }

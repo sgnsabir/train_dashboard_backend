@@ -2,7 +2,6 @@ package com.banenor.dto;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import reactor.core.publisher.Mono;
 
 /**
  * DTO representing aggregated metrics from cache.
@@ -10,16 +9,23 @@ import reactor.core.publisher.Mono;
 @Data
 @NoArgsConstructor
 public class AggregatedMetricsResponse {
-    private Mono<Double> avgSpeed;
-    private String error;
+    /**
+     * The cached average value, if available.
+     */
+    private Double average;
 
-    public AggregatedMetricsResponse(Mono<Double> avgSpeed) {
-        this.avgSpeed = avgSpeed;
-        this.error = null;
+    /**
+     * Error or fallback message when no cached average is available.
+     */
+    private String message;
+
+    public AggregatedMetricsResponse(Double average) {
+        this.average = average;
+        this.message = null;
     }
 
-    public AggregatedMetricsResponse(String error) {
-        this.error = error;
-        this.avgSpeed = null;
+    public AggregatedMetricsResponse(String message) {
+        this.average = null;
+        this.message = message;
     }
 }

@@ -1,4 +1,5 @@
 services:
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.2.1
     container_name: zookeeper
@@ -7,12 +8,10 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-    healthcheck:
-      test: ["CMD", "echo ruok | nc localhost 2181"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    # remove broken healthcheck
     restart: always
+    networks:
+      - banenor-net
 
   kafka:
     image: confluentinc/cp-kafka:7.2.1
@@ -20,14 +19,11 @@ services:
     depends_on:
       - zookeeper
     ports:
-      - "9092:9092"      # Internal container network uses port 9092
-      - "29092:29092"    # Expose port 29092 to your localhost
+      - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      # Two listeners:
-      #   - PLAINTEXT for internal Docker network (mapped to 9092 in the container)
-      #   - HOST for external host usage (mapped to 29092)
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,HOST:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,HOST://0.0.0.0:29092
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:29092
@@ -35,12 +31,10 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-    healthcheck:
-      test: ["CMD", "kafka-topics", "--bootstrap-server", "kafka:9092", "--list"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
+    # remove broken healthcheck
     restart: always
+    networks:
+      - banenor-net
 
   redis:
     image: redis:latest
@@ -53,6 +47,8 @@ services:
       timeout: 5s
       retries: 5
     restart: always
+    networks:
+      - banenor-net
 
   mailhog:
     image: mailhog/mailhog:latest
@@ -60,7 +56,10 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
+    # remove broken nc check; MailHog’s web UI is on 8025
     restart: always
+    networks:
+      - banenor-net
 
   zipkin:
     image: openzipkin/zipkin:2.23.0
@@ -68,11 +67,14 @@ services:
     ports:
       - "9411:9411"
     restart: always
+    networks:
+      - banenor-net
 
   backend:
     build:
       context: .
       dockerfile: Dockerfile
+    image: predictive-maintenance-backend:latest
     container_name: predictive-maintenance-backend
     ports:
       - "8080:8080"
@@ -82,13 +84,11 @@ services:
       - DB_NAME=banenor_db
       - DB_USERNAME=postgres
       - DB_PASSWORD=0000
-      - JWT_SECRET=ahZLfXRYnJ+rl6zrd07Csxyc7EslWqNOZa+Zl/HK3M5mOXDLuoPAczd/Y+VZgTlcfpPSjEnZwVbje9NLhIUFzg==
       - SPRING_REDIS_HOST=redis
       - SPRING_MAIL_HOST=mailhog
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - SPRING_ZIPKIN_BASE_URL=http://zipkin:9411
-    volumes:
-      - integration-test-results:/target/report
+      - SPRING_ZIPKIN_ENABLED=false
+      - SPRING_PROFILES_ACTIVE=test
     depends_on:
       - kafka
       - redis
@@ -100,10 +100,48 @@ services:
       timeout: 10s
       retries: 5
     restart: always
+    networks:
+      - banenor-net
 
-volumes:
-  integration-test-results:
+#  maven:
+#    image: maven:3.9-eclipse-temurin-21
+#    container_name: banenor-maven
+#    working_dir: /app
+#    volumes:
+#      - ./:/app                            # your project sources
+#      - ./target/site:/app/target/site    # bind-mount host target/site
+#    entrypoint:
+#      - sh
+#      - -c
+#      - |
+#        # run tests
+#        mvn test -Dspring.profiles.active=test && \
+#        # generate the HTML report into target/site
+#        mvn org.apache.maven.plugins:maven-surefire-report-plugin:3.5.3-M8:report-only \
+#            -Dspring.profiles.active=test
+#    depends_on:
+#      - backend
+#    restart: "no"
+#    networks:
+#      - banenor-net
+#
+#  report-server:
+#    image: httpd:alpine
+#    container_name: report-server
+#    ports:
+#      - "8000:80"
+#    depends_on:
+#      - maven
+#    restart: always
+#    networks:
+#      - banenor-net
+#    volumes:
+#      - ./target/site:/usr/local/apache2/htdocs:ro
+#
+#volumes:
+#  integration-test-results:
 
 networks:
-  default:
+  banenor-net:
     name: banenor-net
+    driver: bridge
