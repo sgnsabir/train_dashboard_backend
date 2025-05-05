@@ -7,7 +7,7 @@ import java.time.LocalDateTime;
 public class AlertHistoryDTO {
     private Long id;
     private String subject;
-    private String message;
+    private String text;
     private LocalDateTime timestamp;
     private Boolean acknowledged;
 }

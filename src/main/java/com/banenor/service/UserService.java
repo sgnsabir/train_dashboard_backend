@@ -3,11 +3,13 @@ package com.banenor.service;
 import com.banenor.controller.ProfileController.ProfileUpdateRequest;
 import com.banenor.dto.UserProfileDTO;
 import com.banenor.dto.UserResponse;
+import com.banenor.dto.UserUpdateRequest;
 import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.Collections;
@@ -17,6 +19,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class UserService {
+
     private final UserRepository userRepository;
 
     /**
@@ -38,14 +41,59 @@ public class UserService {
     }
 
     /**
+     * Retrieve all users (Admin only).
+     */
+    public Flux<UserResponse> getAllUsers() {
+        return userRepository.findAll()
+                .map(this::mapToUserResponse)
+                .doOnComplete(() -> log.info("Fetched all users"))
+                .doOnError(e -> log.error("Error fetching all users: {}", e.getMessage(), e));
+    }
+
+    /**
+     * Update arbitrary fields on a user (Admin only).
+     */
+    public Mono<UserResponse> updateUser(Long id, UserUpdateRequest request) {
+        return userRepository.findById(id)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found with ID: " + id)))
+                .flatMap(user -> {
+                    if (request.getUsername() != null && !request.getUsername().isBlank()) {
+                        user.setUsername(request.getUsername().trim());
+                    }
+                    if (request.getEmail() != null && !request.getEmail().isBlank()) {
+                        user.setEmail(request.getEmail().trim());
+                    }
+                    if (request.getPhone() != null) {
+                        user.setPhone(request.getPhone().trim());
+                    }
+                    if (request.getAvatar() != null) {
+                        user.setAvatar(request.getAvatar().trim());
+                    }
+                    return userRepository.save(user);
+                })
+                .map(this::mapToUserResponse)
+                .doOnSuccess(u -> log.info("Updated user with ID {}", id))
+                .doOnError(ex -> log.error("Error updating user with ID {}: {}", id, ex.getMessage(), ex));
+    }
+
+    /**
+     * Delete a user by ID (Admin only).
+     */
+    public Mono<Void> deleteUser(Long id) {
+        return userRepository.findById(id)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found with ID: " + id)))
+                .flatMap(user -> userRepository.delete(user))
+                .doOnSuccess(v -> log.info("Deleted user with ID {}", id))
+                .doOnError(ex -> log.error("Error deleting user with ID {}: {}", id, ex.getMessage(), ex));
+    }
+
+    /**
      * If you need the raw User entity (e.g. to pull roles or other fields).
      */
     public Mono<User> findEntityByUsername(String username) {
         return userRepository.findByUsername(username)
                 .doOnError(e -> log.error("Error fetching user entity {}: {}", username, e.getMessage(), e));
     }
-
-    // ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Fetch a UserProfileDTO by user ID.
@@ -121,6 +169,23 @@ public class UserService {
                 .doOnError(e -> log.error("Error updating profile for {}: {}", username, e.getMessage(), e));
     }
 
+    /**
+     * Update a user's avatar URL.
+     */
+    public Mono<UserProfileDTO> updateAvatar(Long userId, String avatarUrl) {
+        return userRepository.findById(userId)
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found: " + userId)))
+                .flatMap(user -> {
+                    user.setAvatar(avatarUrl.trim());
+                    return userRepository.save(user);
+                })
+                .map(this::toDto)
+                .doOnSuccess(dto -> log.info("Avatar updated for user {}", userId))
+                .doOnError(ex -> log.error("Error updating avatar for user {}: {}", userId, ex.getMessage(), ex));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Private mapping helpers
     // ──────────────────────────────────────────────────────────────────────────
 
     private UserProfileDTO toDto(User user) {

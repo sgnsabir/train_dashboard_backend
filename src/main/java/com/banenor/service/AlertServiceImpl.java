@@ -75,7 +75,7 @@ public class AlertServiceImpl implements AlertService {
                     AlertResponse r = new AlertResponse();
                     r.setId(dto.getId());
                     r.setSubject(dto.getSubject());
-                    r.setMessage(dto.getMessage());
+                    r.setMessage(dto.getText());
                     r.setTimestamp(dto.getTimestamp());
                     r.setAcknowledged(dto.getAcknowledged());
                     return r;

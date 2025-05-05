@@ -2,16 +2,41 @@ package com.banenor.repository;
 
 import com.banenor.model.HaugfjellMP1Header;
 import org.springframework.data.r2dbc.repository.Query;
-import org.springframework.data.r2dbc.repository.R2dbcRepository;
-import org.springframework.stereotype.Repository;
+import org.springframework.data.repository.reactive.ReactiveCrudRepository;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
-@Repository
-public interface HaugfjellMP1HeaderRepository extends R2dbcRepository<HaugfjellMP1Header, Integer>,
-        HaugfjellHeaderRepositoryCustom {
-    Mono<HaugfjellMP1Header> findByMstartTime(LocalDateTime mstartTime);
+public interface HaugfjellMP1HeaderRepository extends ReactiveCrudRepository<HaugfjellMP1Header, Integer> {
+
+
+    @Query("""
+        SELECT 
+          h.id,
+          h.train_no,
+          h.created_at,
+          h.mstart_time,
+          h.coo_lat,
+          h.coo_long
+        FROM haugfjell_mp1_header AS h
+        WHERE h.train_no = :trainNo
+          AND h.created_at BETWEEN :start AND :end
+        ORDER BY h.created_at DESC
+        OFFSET :page * :size
+        LIMIT :size
+        """)
+    Flux<HaugfjellMP1Header> findHeaderWithAxleAggregates(
+            Integer trainNo,
+            LocalDateTime start,
+            LocalDateTime end,
+            List<String> fields,
+            int page,
+            int size
+    );
+
+Mono<HaugfjellMP1Header> findByMstartTime(LocalDateTime mstartTime);
 
     // Retrieve the header by train number.
     Mono<HaugfjellMP1Header> findByTrainNo(Integer trainNo);

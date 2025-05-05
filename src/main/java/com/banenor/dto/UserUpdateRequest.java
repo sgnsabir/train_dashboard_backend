@@ -12,4 +12,8 @@ public class UserUpdateRequest {
     @NotBlank(message = "Email must not be blank")
     @Email(message = "Email should be valid")
     private String email;
+
+    private String phone;
+
+    private String avatar;
 }
