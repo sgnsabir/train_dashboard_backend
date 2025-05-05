@@ -1,15 +1,17 @@
 package com.banenor.service;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 import org.springframework.stereotype.Service;
 
 import com.banenor.dto.SensorMetricsDTO;
-import com.banenor.dto.VirtualAssetDTO;
+import com.banenor.dto.DigitalTwinDTO;
 import com.banenor.model.DigitalTwin;
 import com.banenor.repository.DigitalTwinRepository;
 
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Slf4j
@@ -66,17 +68,40 @@ public class DigitalTwinServiceImpl implements DigitalTwinService {
      * @return a Mono emitting the VirtualAssetDTO representing the current digital twin state.
      */
     @Override
-    public Mono<VirtualAssetDTO> getTwinState(Integer assetId) {
+    public Mono<DigitalTwinDTO> getTwinState(Integer assetId) {
         if (assetId == null) {
             return Mono.error(new IllegalArgumentException("Asset identifier cannot be null."));
         }
         return digitalTwinRepository.findById(assetId)
-                .map(twin -> VirtualAssetDTO.builder()
+                .map(twin -> DigitalTwinDTO.builder()
                         .assetId(twin.getAssetId())
                         .status(twin.getStatus())
                         .updatedAt(twin.getUpdatedAt())
                         .sensorSummary(twin.getSensorSummary())
                         .build())
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("Digital twin for asset " + assetId + " not found.")));
+    }
+
+    @Override
+    public Flux<DigitalTwinDTO> findTwinsByFilters(Map<String, Object> filters, int page, int size) {
+        log.debug("Filtering DigitalTwins: {} (page={}, size={})", filters, page, size);
+        return digitalTwinRepository
+                .findByFilters(filters, page, size)
+                .map(this::toDto);  // convert DigitalTwin → VirtualAssetDTO
+    }
+
+    @Override
+    public Mono<Long> countTwinsByFilters(Map<String, Object> filters) {
+        log.debug("Counting DigitalTwins for filters: {}", filters);
+        return digitalTwinRepository.countByFilters(filters);
+    }
+
+    private DigitalTwinDTO toDto(DigitalTwin twin) {
+        return DigitalTwinDTO.builder()
+                .assetId(twin.getAssetId())
+                .status(twin.getStatus())
+                .sensorSummary(twin.getSensorSummary())
+                .updatedAt(twin.getUpdatedAt())
+                .build();
     }
 }

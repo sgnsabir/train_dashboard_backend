@@ -1,30 +1,29 @@
 package com.banenor.service;
 
-import com.banenor.dto.AlertResponse;
 import com.banenor.dto.AlertAcknowledgeRequest;
+import com.banenor.dto.AlertResponse;
+import com.banenor.mapper.AlertHistoryMapper;
+import com.banenor.model.AlertHistory;
+import com.banenor.repository.AlertHistoryRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import reactor.core.publisher.Mono;
 import reactor.core.publisher.Flux;
-import reactor.core.scheduler.Schedulers;
+import reactor.core.publisher.Mono;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicLong;
 
+@Slf4j
 @Service
+@RequiredArgsConstructor
 public class AlertServiceImpl implements AlertService {
 
     private final JavaMailSender mailSender;
-    private final AtomicLong alertIdGenerator = new AtomicLong(1);
-    private final List<AlertResponse> alertHistory = new CopyOnWriteArrayList<>();
-
-    public AlertServiceImpl(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
-    }
+    private final AlertHistoryRepository alertRepo;
+    private final AlertHistoryMapper mapper;
 
     @Scheduled(fixedRateString = "${alert.check.interval.ms:60000}")
     public void scheduledCheckSensorThresholds() {
@@ -33,46 +32,63 @@ public class AlertServiceImpl implements AlertService {
 
     @Override
     public Mono<Void> checkSensorThresholds() {
-        // Stubbed implementation: in real code, query aggregated sensor data reactively.
+        // stubbed sensor‐threshold logic...
         Double averageSpeed = 85.0;
         Double speedThreshold = 80.0;
         if (averageSpeed > speedThreshold) {
-            return sendEmailAlert("High Average Speed Alert",
-                    "Average speed " + averageSpeed + " km/h exceeds threshold!")
-                    .then();
+            String subject = "High Average Speed Alert";
+            String text = "Average speed " + averageSpeed + " km/h exceeds threshold!";
+            return sendEmailAndPersist(subject, text);
         }
         return Mono.empty();
     }
 
-    private Mono<Void> sendEmailAlert(String subject, String text) {
+    private Mono<Void> sendEmailAndPersist(String subject, String text) {
         return Mono.fromRunnable(() -> {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setTo("alert@example.com");
-            message.setSubject(subject);
-            message.setText(text);
-            mailSender.send(message);
-            AlertResponse alertResponse = new AlertResponse();
-            alertResponse.setId(alertIdGenerator.getAndIncrement());
-            alertResponse.setSubject(subject);
-            alertResponse.setText(text);
-            alertResponse.setTimestamp(LocalDateTime.now());
-            alertResponse.setAcknowledged(false);
-            alertHistory.add(alertResponse);
-        }).subscribeOn(Schedulers.boundedElastic()).then();
+                    // send email
+                    SimpleMailMessage message = new SimpleMailMessage();
+                    message.setTo("alert@example.com");
+                    message.setSubject(subject);
+                    message.setText(text);
+                    mailSender.send(message);
+                })
+                .then(Mono.defer(() -> {
+                    // persist
+                    AlertHistory entity = AlertHistory.builder()
+                            .subject(subject)
+                            .text(text)
+                            .timestamp(LocalDateTime.now())
+                            .acknowledged(false)
+                            .build();
+                    return alertRepo.save(entity);
+                }))
+                .doOnNext(saved -> log.debug("Persisted alert {}", saved.getId()))
+                .then();
     }
 
     @Override
     public Flux<AlertResponse> getAlertHistory() {
-        return Flux.fromIterable(alertHistory);
+        return alertRepo.findAllByOrderByTimestampDesc()
+                .map(mapper::toDto)
+                // convert AlertHistoryDTO → AlertResponse
+                .map(dto -> {
+                    AlertResponse r = new AlertResponse();
+                    r.setId(dto.getId());
+                    r.setSubject(dto.getSubject());
+                    r.setMessage(dto.getMessage());
+                    r.setTimestamp(dto.getTimestamp());
+                    r.setAcknowledged(dto.getAcknowledged());
+                    return r;
+                });
     }
 
     @Override
     public Mono<Void> acknowledgeAlert(AlertAcknowledgeRequest request) {
-        return Mono.fromRunnable(() -> {
-            alertHistory.stream()
-                    .filter(alert -> alert.getId().equals(request.getAlertId()))
-                    .findFirst()
-                    .ifPresent(alert -> alert.setAcknowledged(true));
-        }).subscribeOn(Schedulers.boundedElastic()).then();
+        return alertRepo.findById(request.getAlertId())
+                .flatMap(alert -> {
+                    alert.setAcknowledged(true);
+                    return alertRepo.save(alert);
+                })
+                .then();
     }
 }

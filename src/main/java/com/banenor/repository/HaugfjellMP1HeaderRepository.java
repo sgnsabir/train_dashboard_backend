@@ -5,10 +5,13 @@ import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Mono;
+
 import java.time.LocalDateTime;
 
 @Repository
-public interface HaugfjellMP1HeaderRepository extends R2dbcRepository<HaugfjellMP1Header, Integer> {
+public interface HaugfjellMP1HeaderRepository extends R2dbcRepository<HaugfjellMP1Header, Integer>,
+        HaugfjellHeaderRepositoryCustom {
+    Mono<HaugfjellMP1Header> findByMstartTime(LocalDateTime mstartTime);
 
     // Retrieve the header by train number.
     Mono<HaugfjellMP1Header> findByTrainNo(Integer trainNo);
@@ -31,6 +34,4 @@ public interface HaugfjellMP1HeaderRepository extends R2dbcRepository<HaugfjellM
     @Query("SELECT mstop_time FROM haugfjell_mp1_header WHERE train_no = :trainNo")
     Mono<LocalDateTime> findMstopTimeByTrainNo(Integer trainNo);
 
-    // Retrieve a header by its mstart_time (useful for deduplication during insert operations)
-    Mono<HaugfjellMP1Header> findByMstartTime(LocalDateTime mstartTime);
 }

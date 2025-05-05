@@ -1,109 +1,150 @@
 package com.banenor.exception;
 
-
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.bind.support.WebExchangeBindException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
-
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestControllerAdvice
-@Order(0) // High precedence for exception handling
+@Order(0)
 public class GlobalExceptionHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
-    @ExceptionHandler(Exception.class)
-    public Mono<ApiError> handleAllExceptions(Exception ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.error("Unhandled exception [correlationId={}]: {}", correlationId, ex.getMessage(), ex);
-        ApiError error = new ApiError("ERR-500", "Internal server error", LocalDateTime.now(), correlationId);
-        exchange.getResponse().setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
-        return Mono.just(error);
+    private String newCorrelation() {
+        return UUID.randomUUID().toString();
     }
 
     @ExceptionHandler(WebExchangeBindException.class)
-    public Mono<ApiError> handleValidationExceptions(WebExchangeBindException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        Map<String, String> errors = new HashMap<>();
-        ex.getFieldErrors().forEach(fieldError -> errors.put(fieldError.getField(), fieldError.getDefaultMessage()));
-        logger.warn("Validation error [correlationId={}]: {}", correlationId, errors);
-        ApiError error = new ApiError("ERR-400", "Validation Failed: " + errors.toString(), LocalDateTime.now(), correlationId);
+    public Mono<ApiError> handleValidation(WebExchangeBindException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        BindingResult br = ex.getBindingResult();
+        List<String> details = br.getFieldErrors().stream()
+                .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
+                .collect(Collectors.toList());
+        logger.warn("Validation failed [cid={}]: {}", cid, details);
         exchange.getResponse().setStatusCode(HttpStatus.BAD_REQUEST);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-400",
+                "Validation failed",
+                details,
+                LocalDateTime.now(),
+                cid
+        ));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    public Mono<ApiError> handleConstraintViolation(ConstraintViolationException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        List<String> details = ex.getConstraintViolations().stream()
+                .map(cv -> cv.getPropertyPath() + ": " + cv.getMessage())
+                .collect(Collectors.toList());
+        logger.warn("Constraint violations [cid={}]: {}", cid, details);
+        exchange.getResponse().setStatusCode(HttpStatus.BAD_REQUEST);
+        return Mono.just(new ApiError(
+                "ERR-400",
+                "Validation failed",
+                details,
+                LocalDateTime.now(),
+                cid
+        ));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)
-    public Mono<ApiError> handleHttpMessageNotReadable(HttpMessageNotReadableException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.warn("Malformed JSON request [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-400", "Malformed JSON request", LocalDateTime.now(), correlationId);
+    public Mono<ApiError> handleMalformedJson(HttpMessageNotReadableException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        logger.warn("Malformed JSON [cid={}]: {}", cid, ex.getMessage());
         exchange.getResponse().setStatusCode(HttpStatus.BAD_REQUEST);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-400",
+                "Malformed JSON request",
+                List.of(ex.getMessage()),
+                LocalDateTime.now(),
+                cid
+        ));
     }
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
-    public Mono<ApiError> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.warn("Type mismatch [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-400", "Invalid parameter: " + ex.getName(), LocalDateTime.now(), correlationId);
+    public Mono<ApiError> handleTypeMismatch(MethodArgumentTypeMismatchException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        String msg = ex.getName() + " should be of type " + ex.getRequiredType().getSimpleName();
+        logger.warn("Type mismatch [cid={}]: {}", cid, msg);
         exchange.getResponse().setStatusCode(HttpStatus.BAD_REQUEST);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-400",
+                "Type mismatch",
+                List.of(msg),
+                LocalDateTime.now(),
+                cid
+        ));
     }
 
     @ExceptionHandler(ResourceNotFoundException.class)
-    public Mono<ApiError> handleResourceNotFound(ResourceNotFoundException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.warn("Resource not found [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-404", ex.getMessage(), LocalDateTime.now(), correlationId);
+    public Mono<ApiError> handleNotFound(ResourceNotFoundException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        logger.warn("Not found [cid={}]: {}", cid, ex.getMessage());
         exchange.getResponse().setStatusCode(HttpStatus.NOT_FOUND);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-404",
+                ex.getMessage(),
+                List.of(),
+                LocalDateTime.now(),
+                cid
+        ));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
-    public Mono<ApiError> handleInvalidCredentials(InvalidCredentialsException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.warn("Invalid credentials [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-401", "Invalid username or password", LocalDateTime.now(), correlationId);
+    public Mono<ApiError> handleAuthFail(InvalidCredentialsException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        logger.warn("Auth failed [cid={}]: {}", cid, ex.getMessage());
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-401",
+                "Invalid username or password",
+                List.of(),
+                LocalDateTime.now(),
+                cid
+        ));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)
-    public Mono<ApiError> handleIllegalArgumentException(IllegalArgumentException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.error("IllegalArgumentException [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-400", ex.getMessage(), LocalDateTime.now(), correlationId);
+    public Mono<ApiError> handleBadArg(IllegalArgumentException ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        logger.error("Bad argument [cid={}]: {}", cid, ex.getMessage());
         exchange.getResponse().setStatusCode(HttpStatus.BAD_REQUEST);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-400",
+                ex.getMessage(),
+                List.of(),
+                LocalDateTime.now(),
+                cid
+        ));
     }
 
-    @ExceptionHandler(NullPointerException.class)
-    public Mono<ApiError> handleNullPointerException(NullPointerException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.error("NullPointerException [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-500", "A required value was null", LocalDateTime.now(), correlationId);
+    @ExceptionHandler(Exception.class)
+    public Mono<ApiError> handleAll(Exception ex, ServerWebExchange exchange) {
+        String cid = newCorrelation();
+        logger.error("Internal error [cid={}]: {}", cid, ex.getMessage(), ex);
         exchange.getResponse().setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
-        return Mono.just(error);
-    }
-
-    @ExceptionHandler(IllegalStateException.class)
-    public Mono<ApiError> handleIllegalStateException(IllegalStateException ex, ServerWebExchange exchange) {
-        String correlationId = UUID.randomUUID().toString();
-        logger.error("IllegalStateException [correlationId={}]: {}", correlationId, ex.getMessage());
-        ApiError error = new ApiError("ERR-500", "Invalid application state", LocalDateTime.now(), correlationId);
-        exchange.getResponse().setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
-        return Mono.just(error);
+        return Mono.just(new ApiError(
+                "ERR-500",
+                "Internal server error",
+                List.of("An unexpected error occurred"),
+                LocalDateTime.now(),
+                cid
+        ));
     }
 }

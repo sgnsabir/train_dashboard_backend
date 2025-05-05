@@ -1,24 +1,17 @@
 package com.banenor.service;
 
-import com.banenor.model.UserSettings;
+import com.banenor.dto.DashboardSettingsDTO;
 import reactor.core.publisher.Mono;
 
 public interface SettingsService {
 
     /**
-     * Retrieves settings for the given user.
-     *
-     * @param userId the unique identifier of the user.
-     * @return a Mono emitting the UserSettings for the given userId.
+     * Fetch the dashboard & notification settings for a given user.
      */
-    Mono<UserSettings> getUserSettings(Long userId);
+    Mono<DashboardSettingsDTO> getUserSettings(Long userId);
 
     /**
-     * Updates settings for the given user.
-     *
-     * @param userId the unique identifier of the user.
-     * @param settings the new settings payload.
-     * @return a Mono emitting the updated UserSettings.
+     * Update the dashboard & notification settings for a given user.
      */
-    Mono<UserSettings> updateUserSettings(Long userId, UserSettings settings);
+    Mono<DashboardSettingsDTO> updateUserSettings(Long userId, DashboardSettingsDTO settings);
 }

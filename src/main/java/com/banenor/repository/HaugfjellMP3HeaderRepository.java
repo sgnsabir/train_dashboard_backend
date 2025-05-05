@@ -8,7 +8,8 @@ import reactor.core.publisher.Mono;
 import java.time.LocalDateTime;
 
 @Repository
-public interface HaugfjellMP3HeaderRepository extends R2dbcRepository<HaugfjellMP3Header, Integer> {
+public interface HaugfjellMP3HeaderRepository extends R2dbcRepository<HaugfjellMP3Header, Integer>,
+        HaugfjellHeaderRepositoryCustom {
 
     // Retrieve the header by train number.
     Mono<HaugfjellMP3Header> findByTrainNo(Integer trainNo);

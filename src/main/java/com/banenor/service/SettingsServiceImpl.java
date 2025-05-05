@@ -1,11 +1,14 @@
 package com.banenor.service;
 
+import com.banenor.dto.DashboardSettingsDTO;
 import com.banenor.model.UserSettings;
 import com.banenor.repository.UserSettingsRepository;
+import jakarta.validation.ValidationException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
+
 
 import java.time.LocalDateTime;
 
@@ -14,58 +17,74 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class SettingsServiceImpl implements SettingsService {
 
-    private final UserSettingsRepository settingsRepository;
+    private final UserSettingsRepository repo;
 
     @Override
-    public Mono<UserSettings> getUserSettings(Long userId) {
-        log.debug("Fetching settings for userId: {}", userId);
-        return settingsRepository.findById(userId)
-                .switchIfEmpty(Mono.defer(() -> {
-                    log.warn("No settings found for userId {}. Creating default settings.", userId);
-                    UserSettings defaultSettings = UserSettings.builder()
-                            .userId(userId)
-                            .username("")
-                            .email("")
-                            .avatarUrl("/images/default-avatar.png")
-                            .showSpeedWidget(true)
-                            .showFuelWidget(true)
-                            .showPerformanceWidget(true)
-                            .enableNotifications(true)
-                            .emailAlerts(true)
-                            .smsAlerts(false)
-                            .twoFactorEnabled(false)
-                            .phoneNumber("")
-                            .createdAt(LocalDateTime.now())
-                            .updatedAt(LocalDateTime.now())
-                            .build();
-                    return settingsRepository.save(defaultSettings);
-                }));
+    public Mono<DashboardSettingsDTO> getUserSettings(Long userId) {
+        return repo.findById(userId)
+                .defaultIfEmpty(createDefault(userId))
+                .map(this::toDto)
+                .doOnSuccess(dto -> log.info("Fetched settings for userId={}", userId));
     }
 
     @Override
-    public Mono<UserSettings> updateUserSettings(Long userId, UserSettings settings) {
-        log.debug("Updating settings for userId {}: {}", userId, settings);
-        return settingsRepository.findById(userId)
-                .flatMap(existing -> {
-                    existing.setUsername(settings.getUsername());
-                    existing.setEmail(settings.getEmail());
-                    existing.setAvatarUrl(settings.getAvatarUrl());
-                    existing.setShowSpeedWidget(settings.getShowSpeedWidget());
-                    existing.setShowFuelWidget(settings.getShowFuelWidget());
-                    existing.setShowPerformanceWidget(settings.getShowPerformanceWidget());
-                    existing.setEnableNotifications(settings.getEnableNotifications());
-                    existing.setEmailAlerts(settings.getEmailAlerts());
-                    existing.setSmsAlerts(settings.getSmsAlerts());
-                    existing.setTwoFactorEnabled(settings.getTwoFactorEnabled());
-                    existing.setPhoneNumber(settings.getPhoneNumber());
-                    existing.setUpdatedAt(LocalDateTime.now());
-                    return settingsRepository.save(existing);
+    public Mono<DashboardSettingsDTO> updateUserSettings(Long userId, DashboardSettingsDTO dto) {
+        if (!userId.equals(dto.getUserId())) {
+            return Mono.error(new ValidationException("Path userId and body.userId must match"));
+        }
+
+        return repo.findById(userId)
+                .defaultIfEmpty(createDefault(userId))
+                .flatMap(entity -> {
+                    // overlay allowed fields
+                    entity.setShowSpeedWidget(dto.getShowSpeedWidget());
+                    entity.setShowFuelWidget(dto.getShowFuelWidget());
+                    entity.setShowPerformanceWidget(dto.getShowPerformanceWidget());
+                    entity.setEnableNotifications(dto.getEnableNotifications());
+                    entity.setEmailAlerts(dto.getEmailAlerts());
+                    entity.setSmsAlerts(dto.getSmsAlerts());
+                    entity.setTwoFactorEnabled(dto.getTwoFactorEnabled());
+                    entity.setPhoneNumber(dto.getPhoneNumber());
+                    entity.setUpdatedAt(LocalDateTime.now());
+                    return repo.save(entity);
                 })
-                .switchIfEmpty(Mono.defer(() -> {
-                    settings.setUserId(userId);
-                    settings.setCreatedAt(LocalDateTime.now());
-                    settings.setUpdatedAt(LocalDateTime.now());
-                    return settingsRepository.save(settings);
-                }));
+                .map(this::toDto)
+                .doOnSuccess(updated -> log.info("Updated settings for userId={}", userId));
+    }
+
+    private UserSettings createDefault(Long userId) {
+        LocalDateTime now = LocalDateTime.now();
+        return UserSettings.builder()
+                .userId(userId)
+                .showSpeedWidget(true)
+                .showFuelWidget(true)
+                .showPerformanceWidget(true)
+                .enableNotifications(true)
+                .emailAlerts(true)
+                .smsAlerts(false)
+                .twoFactorEnabled(false)
+                .phoneNumber("")
+                .createdAt(now)
+                .updatedAt(now)
+                .build();
+    }
+
+    private DashboardSettingsDTO toDto(UserSettings e) {
+        return DashboardSettingsDTO.builder()
+                .userId(e.getUserId())
+                .username(e.getUsername())
+                .email(e.getEmail())
+                .avatarUrl(e.getAvatarUrl())
+                .showSpeedWidget(e.getShowSpeedWidget())
+                .showFuelWidget(e.getShowFuelWidget())
+                .showPerformanceWidget(e.getShowPerformanceWidget())
+                .enableNotifications(e.getEnableNotifications())
+                .emailAlerts(e.getEmailAlerts())
+                .smsAlerts(e.getSmsAlerts())
+                .twoFactorEnabled(e.getTwoFactorEnabled())
+                .phoneNumber(e.getPhoneNumber())
+                .createdAt(e.getCreatedAt())
+                .updatedAt(e.getUpdatedAt())
+                .build();
     }
 }

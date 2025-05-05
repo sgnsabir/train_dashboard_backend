@@ -1,6 +1,7 @@
+// src/main/java/com/banenor/controller/ProfileController.java
 package com.banenor.controller;
 
-import com.banenor.dto.UserResponse;
+import com.banenor.dto.UserProfileDTO;
 import com.banenor.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -9,6 +10,7 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -27,38 +29,37 @@ public class ProfileController {
         this.userService = userService;
     }
 
-    @Operation(
-            summary = "Get Current User Profile",
-            description = "Retrieve the profile details of the currently authenticated user"
-    )
+    @Operation(summary = "Get Current User Profile",
+            description = "Retrieve the profile details of the currently authenticated user")
     @GetMapping
-    public Mono<ResponseEntity<UserResponse>> getProfile(@AuthenticationPrincipal UserDetails userDetails) {
+    public Mono<ResponseEntity<UserProfileDTO>> getProfile(
+            @AuthenticationPrincipal UserDetails userDetails) {
+
         if (userDetails == null) {
-            log.warn("No authenticated user found; returning 401");
-            return Mono.just(ResponseEntity.status(401).build());
+            log.warn("No authenticated user; returning 401");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
-        return userService.getUserByUsername(userDetails.getUsername())
-                .map(ResponseEntity::ok)
-                .defaultIfEmpty(ResponseEntity.notFound().build())
-                .doOnError(ex -> log.error("Error retrieving profile for {}: {}", userDetails.getUsername(), ex.getMessage(), ex));
+
+        return userService.getUserProfile(userDetails.getUsername())
+                .map(dto -> ResponseEntity.ok(dto))
+                .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
-    @Operation(
-            summary = "Update Profile",
-            description = "Update profile details such as avatar, email, and phone for the currently authenticated user"
-    )
+    @Operation(summary = "Update Profile",
+            description = "Update profile details such as avatar, email, and phone for the currently authenticated user")
     @PutMapping
-    public Mono<ResponseEntity<UserResponse>> updateProfile(@AuthenticationPrincipal UserDetails userDetails,
-                                                            @Valid @RequestBody ProfileUpdateRequest request) {
+    public Mono<ResponseEntity<UserProfileDTO>> updateProfile(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @Valid @RequestBody ProfileUpdateRequest request) {
+
         if (userDetails == null) {
-            log.warn("No authenticated user found; cannot update profile");
-            return Mono.just(ResponseEntity.status(401).build());
+            log.warn("No authenticated user; cannot update profile");
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
-        String username = userDetails.getUsername();
-        return userService.updateProfile(username, request)
-                .map(ResponseEntity::ok)
-                .defaultIfEmpty(ResponseEntity.notFound().build())
-                .doOnError(ex -> log.error("Error updating profile for {}: {}", username, ex.getMessage(), ex));
+
+        return userService.updateUserProfile(userDetails.getUsername(), request)
+                .map(dto -> ResponseEntity.ok(dto))
+                .defaultIfEmpty(ResponseEntity.notFound().build());
     }
 
     @Data
@@ -67,10 +68,9 @@ public class ProfileController {
         private String email;
 
         // URL for the user's avatar image.
-        // (Consider adding additional URL validation if required.)
         private String avatar;
 
-        // Phone number – basic regex to validate common formats.
+        // Basic phone‐number validation
         @Pattern(regexp = "^\\+?[0-9\\- ]{7,15}$", message = "Invalid phone number format")
         private String phone;
     }

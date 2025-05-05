@@ -8,358 +8,616 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
+import java.util.Objects;
+import java.util.function.Function;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AggregationServiceImpl implements AggregationService {
 
     private final RepositoryResolver repositoryResolver;
+    private final HaugfjellMP1AxlesRepository mp1Repo;
+    private final HaugfjellMP3AxlesRepository mp3Repo;
 
-    /**
-     * Helper method to resolve the appropriate repository (MP1 or MP3) for the given train number
-     * and execute the provided query function.
-     */
-    private <T> Mono<T> executeGlobalQuery(Integer trainNo,
-                                           java.util.function.Function<Object, Mono<T>> queryFunction) {
-        return repositoryResolver.resolveRepository(trainNo)
-                .flatMap(queryFunction);
-    }
-
-    // --- SPEED AGGREGATIONS ---
+    //───────────────────────────────────────────────────────────────────────────────
+    // SPEED METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageSpeed(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageSpeed();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageSpeed();
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSpeedByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSpeedByTrainNo(trainNo),
+                "average speed"
+        );
     }
 
     @Override
     public Mono<Double> getMinSpeed(Integer trainNo) {
-        // No dedicated min query provided – fallback to the average value.
-        return getAverageSpeed(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinSpeedByTrainNo(trainNo),
+                repo -> repo.findOverallMinSpeedByTrainNo(trainNo),
+                "min speed"
+        );
     }
 
     @Override
     public Mono<Double> getMaxSpeed(Integer trainNo) {
-        // No dedicated max query provided – fallback to the average value.
-        return getAverageSpeed(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxSpeedByTrainNo(trainNo),
+                repo -> repo.findOverallMaxSpeedByTrainNo(trainNo),
+                "max speed"
+        );
     }
 
     @Override
     public Mono<Double> getSpeedVariance(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            Mono<Double> avgSpeed;
-            Mono<Double> avgSquareSpeed;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgSpeed = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageSpeed();
-                avgSquareSpeed = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageSquareSpeed();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgSpeed = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageSpeed();
-                avgSquareSpeed = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageSquareSpeed();
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgSpeed.zipWith(avgSquareSpeed, (avg, avgSq) -> avgSq - (avg * avg));
-        });
+        return Mono.zip(
+                        getAverageSquareSpeed(trainNo),
+                        getAverageSpeed(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Speed variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing speed variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- ANGLE OF ATTACK (AOA) AGGREGATIONS ---
+    private Mono<Double> getAverageSquareSpeed(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareSpeedByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareSpeedByTrainNo(trainNo),
+                "average square speed"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // ANGLE-OF-ATTACK METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageAoa(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageAoa();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageAoa();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgAoaByTrainNo(trainNo),
+                repo -> repo.findOverallAvgAoaByTrainNo(trainNo),
+                "average AOA"
+        );
     }
 
     @Override
     public Mono<Double> getMinAoa(Integer trainNo) {
-        // Fallback for min AOA—no dedicated min query; returning average.
-        return getAverageAoa(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinAoaByTrainNo(trainNo),
+                repo -> repo.findOverallMinAoaByTrainNo(trainNo),
+                "min AOA"
+        );
     }
 
     @Override
     public Mono<Double> getMaxAoa(Integer trainNo) {
-        // Fallback for max AOA—returning average.
-        return getAverageAoa(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxAoaByTrainNo(trainNo),
+                repo -> repo.findOverallMaxAoaByTrainNo(trainNo),
+                "max AOA"
+        );
     }
 
     @Override
     public Mono<Double> getAoaVariance(Integer trainNo) {
-        // No global query for square of aoa provided; return 0 variance as fallback.
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareAoa(trainNo),
+                        getAverageAoa(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("AOA variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing AOA variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- VIBRATION AGGREGATIONS (Left) ---
+    private Mono<Double> getAverageSquareAoa(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareAoaByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareAoaByTrainNo(trainNo),
+                "average square AOA"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // VIBRATION (LEFT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageVibrationLeft(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVibrationLeft();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVibrationLeft();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgVibrationLeftByTrainNo(trainNo),
+                "average vibration left"
+        );
     }
 
     @Override
     public Mono<Double> getMinVibrationLeft(Integer trainNo) {
-        return getAverageVibrationLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMinVibrationLeftByTrainNo(trainNo),
+                "min vibration left"
+        );
     }
 
     @Override
     public Mono<Double> getMaxVibrationLeft(Integer trainNo) {
-        return getAverageVibrationLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMaxVibrationLeftByTrainNo(trainNo),
+                "max vibration left"
+        );
     }
 
     @Override
     public Mono<Double> getVibrationLeftVariance(Integer trainNo) {
-        // No average-square query provided for vibration left; fallback to 0.0.
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareVibrationLeft(trainNo),
+                        getAverageVibrationLeft(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Vibration-left variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing vibration-left variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- VIBRATION AGGREGATIONS (Right) ---
+    private Mono<Double> getAverageSquareVibrationLeft(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareVibrationLeftByTrainNo(trainNo),
+                "average square vibration left"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // VIBRATION (RIGHT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageVibrationRight(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVibrationRight();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVibrationRight();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgVibrationRightByTrainNo(trainNo),
+                "average vibration right"
+        );
     }
 
     @Override
     public Mono<Double> getMinVibrationRight(Integer trainNo) {
-        return getAverageVibrationRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallMinVibrationRightByTrainNo(trainNo),
+                "min vibration right"
+        );
     }
 
     @Override
     public Mono<Double> getMaxVibrationRight(Integer trainNo) {
-        return getAverageVibrationRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallMaxVibrationRightByTrainNo(trainNo),
+                "max vibration right"
+        );
     }
 
     @Override
     public Mono<Double> getVibrationRightVariance(Integer trainNo) {
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareVibrationRight(trainNo),
+                        getAverageVibrationRight(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Vibration-right variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing vibration-right variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- VERTICAL FORCE AGGREGATIONS (Left) ---
+    private Mono<Double> getAverageSquareVibrationRight(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareVibrationRightByTrainNo(trainNo),
+                "average square vibration right"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // VERTICAL FORCE (LEFT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageVerticalForceLeft(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgVerticalForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgVerticalForceLeftByTrainNo(trainNo),
+                "average vertical force left"
+        );
     }
 
     @Override
     public Mono<Double> getMinVerticalForceLeft(Integer trainNo) {
-        return getAverageVerticalForceLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinVerticalForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMinVerticalForceLeftByTrainNo(trainNo),
+                "min vertical force left"
+        );
     }
 
     @Override
     public Mono<Double> getMaxVerticalForceLeft(Integer trainNo) {
-        return getAverageVerticalForceLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxVerticalForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMaxVerticalForceLeftByTrainNo(trainNo),
+                "max vertical force left"
+        );
     }
 
     @Override
     public Mono<Double> getVerticalForceLeftVariance(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            Mono<Double> avgForce;
-            Mono<Double> avgSquareForce;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgForce = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
-                // Using the dedicated query for vertical force left by train number (even though it still uses tp1)
-                avgSquareForce = ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgForce = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceLeft();
-                avgSquareForce = ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceLeftByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgForce.zipWith(avgSquareForce, (avg, avgSq) -> avgSq - (avg * avg));
-        });
+        return Mono.zip(
+                        getAverageSquareVerticalForceLeft(trainNo),
+                        getAverageVerticalForceLeft(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Vertical-force-left variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing vertical-force-left variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- VERTICAL FORCE AGGREGATIONS (Right) ---
+    private Mono<Double> getAverageSquareVerticalForceLeft(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareVerticalForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareVerticalForceLeftByTrainNo(trainNo),
+                "average square vertical force left"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // VERTICAL FORCE (RIGHT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageVerticalForceRight(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceRight();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceRight();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgVerticalForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgVerticalForceRightByTrainNo(trainNo),
+                "average vertical force right"
+        );
     }
 
     @Override
     public Mono<Double> getMinVerticalForceRight(Integer trainNo) {
-        return getAverageVerticalForceRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinVerticalForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallMinVerticalForceRightByTrainNo(trainNo),
+                "min vertical force right"
+        );
     }
 
     @Override
     public Mono<Double> getMaxVerticalForceRight(Integer trainNo) {
-        return getAverageVerticalForceRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxVerticalForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallMaxVerticalForceRightByTrainNo(trainNo),
+                "max vertical force right"
+        );
     }
 
     @Override
     public Mono<Double> getVerticalForceRightVariance(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            Mono<Double> avgForce;
-            Mono<Double> avgSquareForce;
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                avgForce = ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageVerticalForceRight();
-                avgSquareForce = ((HaugfjellMP1AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                avgForce = ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageVerticalForceRight();
-                avgSquareForce = ((HaugfjellMP3AxlesRepository) repo).findAverageVerticalForceRightByTrainNo(trainNo);
-            } else {
-                return Mono.error(new IllegalStateException("Unsupported repository type"));
-            }
-            return avgForce.zipWith(avgSquareForce, (avg, avgSq) -> avgSq - (avg * avg));
-        });
+        return Mono.zip(
+                        getAverageSquareVerticalForceRight(trainNo),
+                        getAverageVerticalForceRight(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Vertical-force-right variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing vertical-force-right variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- LATERAL FORCE AGGREGATIONS (Left) ---
+    private Mono<Double> getAverageSquareVerticalForceRight(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareVerticalForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareVerticalForceRightByTrainNo(trainNo),
+                "average square vertical force right"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // LATERAL FORCE (LEFT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageLateralForceLeft(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralForceLeft();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralForceLeft();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgLateralForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgLateralForceLeftByTrainNo(trainNo),
+                "average lateral force left"
+        );
     }
 
     @Override
     public Mono<Double> getMinLateralForceLeft(Integer trainNo) {
-        return getAverageLateralForceLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinLateralForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMinLateralForceLeftByTrainNo(trainNo),
+                "min lateral force left"
+        );
     }
 
     @Override
     public Mono<Double> getMaxLateralForceLeft(Integer trainNo) {
-        return getAverageLateralForceLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxLateralForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMaxLateralForceLeftByTrainNo(trainNo),
+                "max lateral force left"
+        );
     }
 
     @Override
     public Mono<Double> getLateralForceLeftVariance(Integer trainNo) {
-        // No dedicated variance query—return 0.0 as fallback.
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareLateralForceLeft(trainNo),
+                        getAverageLateralForceLeft(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Lateral-force-left variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing lateral-force-left variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- LATERAL FORCE AGGREGATIONS (Right) ---
+    private Mono<Double> getAverageSquareLateralForceLeft(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareLateralForceLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareLateralForceLeftByTrainNo(trainNo),
+                "average square lateral force left"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // LATERAL FORCE (RIGHT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageLateralForceRight(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralForceRight();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralForceRight();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgLateralForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgLateralForceRightByTrainNo(trainNo),
+                "average lateral force right"
+        );
     }
 
     @Override
     public Mono<Double> getMinLateralForceRight(Integer trainNo) {
-        return getAverageLateralForceRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinLateralForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallMinLateralForceRightByTrainNo(trainNo),
+                "min lateral force right"
+        );
     }
 
     @Override
     public Mono<Double> getMaxLateralForceRight(Integer trainNo) {
-        return getAverageLateralForceRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxLateralForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallMaxLateralForceRightByTrainNo(trainNo),
+                "max lateral force right"
+        );
     }
 
     @Override
     public Mono<Double> getLateralForceRightVariance(Integer trainNo) {
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareLateralForceRight(trainNo),
+                        getAverageLateralForceRight(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Lateral-force-right variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing lateral-force-right variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- LATERAL VIBRATION AGGREGATIONS (Left) ---
+    private Mono<Double> getAverageSquareLateralForceRight(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareLateralForceRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareLateralForceRightByTrainNo(trainNo),
+                "average square lateral force right"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // LATERAL VIBRATION (LEFT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageLateralVibrationLeft(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralVibrationLeft();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralVibrationLeft();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgLateralVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgLateralVibrationLeftByTrainNo(trainNo),
+                "average lateral vibration left"
+        );
     }
 
     @Override
     public Mono<Double> getMinLateralVibrationLeft(Integer trainNo) {
-        return getAverageLateralVibrationLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinLateralVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMinLateralVibrationLeftByTrainNo(trainNo),
+                "min lateral vibration left"
+        );
     }
 
     @Override
     public Mono<Double> getMaxLateralVibrationLeft(Integer trainNo) {
-        return getAverageLateralVibrationLeft(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxLateralVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallMaxLateralVibrationLeftByTrainNo(trainNo),
+                "max lateral vibration left"
+        );
     }
 
     @Override
     public Mono<Double> getLateralVibrationLeftVariance(Integer trainNo) {
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareLateralVibrationLeft(trainNo),
+                        getAverageLateralVibrationLeft(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Lateral-vibration-left variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing lateral-vibration-left variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
     }
 
-    // --- LATERAL VIBRATION AGGREGATIONS (Right) ---
+    private Mono<Double> getAverageSquareLateralVibrationLeft(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareLateralVibrationLeftByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareLateralVibrationLeftByTrainNo(trainNo),
+                "average square lateral vibration left"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // LATERAL VIBRATION (RIGHT) METRICS
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Override
     public Mono<Double> getAverageLateralVibrationRight(Integer trainNo) {
-        return executeGlobalQuery(trainNo, repo -> {
-            if (repo instanceof HaugfjellMP1AxlesRepository) {
-                return ((HaugfjellMP1AxlesRepository) repo).findGlobalAverageLateralVibrationRight();
-            } else if (repo instanceof HaugfjellMP3AxlesRepository) {
-                return ((HaugfjellMP3AxlesRepository) repo).findGlobalAverageLateralVibrationRight();
-            }
-            return Mono.error(new IllegalStateException("Unsupported repository type"));
-        });
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgLateralVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgLateralVibrationRightByTrainNo(trainNo),
+                "average lateral vibration right"
+        );
     }
 
     @Override
     public Mono<Double> getMinLateralVibrationRight(Integer trainNo) {
-        return getAverageLateralVibrationRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMinLateralVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallMinLateralVibrationRightByTrainNo(trainNo),
+                "min lateral vibration right"
+        );
     }
 
     @Override
     public Mono<Double> getMaxLateralVibrationRight(Integer trainNo) {
-        return getAverageLateralVibrationRight(trainNo);
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallMaxLateralVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallMaxLateralVibrationRightByTrainNo(trainNo),
+                "max lateral vibration right"
+        );
     }
 
     @Override
     public Mono<Double> getLateralVibrationRightVariance(Integer trainNo) {
-        return Mono.just(0.0);
+        return Mono.zip(
+                        getAverageSquareLateralVibrationRight(trainNo),
+                        getAverageLateralVibrationRight(trainNo),
+                        (avgSq, avg) -> avgSq - (avg * avg)
+                )
+                .doOnSuccess(v -> log.debug("Lateral-vibration-right variance for train {} = {}", trainNo, v))
+                .onErrorResume(e -> {
+                    log.warn("Error computing lateral-vibration-right variance for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
+    }
+
+    private Mono<Double> getAverageSquareLateralVibrationRight(Integer trainNo) {
+        return queryMetric(
+                trainNo,
+                repo -> repo.findOverallAvgSquareLateralVibrationRightByTrainNo(trainNo),
+                repo -> repo.findOverallAvgSquareLateralVibrationRightByTrainNo(trainNo),
+                "average square lateral vibration right"
+        );
+    }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // GENERIC ROUTING HELPER
+    //───────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Routes to the correct repository implementation,
+     * applies the given function and handles errors uniformly.
+     */
+    private Mono<Double> queryMetric(
+            Integer trainNo,
+            Function<HaugfjellMP1AxlesRepository, Mono<Double>> mp1Query,
+            Function<HaugfjellMP3AxlesRepository, Mono<Double>> mp3Query,
+            String metricName
+    ) {
+        Objects.requireNonNull(trainNo, metricName + " requires a train number");
+
+        return repositoryResolver.resolveRepository(trainNo)
+                .flatMap(repo -> {
+                    if (repo instanceof HaugfjellMP1AxlesRepository r1) {
+                        return mp1Query.apply(r1);
+                    } else if (repo instanceof HaugfjellMP3AxlesRepository r3) {
+                        return mp3Query.apply(r3);
+                    } else {
+                        return Mono.error(new IllegalStateException("No matching repository for train " + trainNo));
+                    }
+                })
+                .doOnSuccess(v -> log.debug("{} for train {} = {}", metricName, trainNo, v))
+                .doOnError(e -> log.warn("Error fetching {} for train {}: {}", metricName, trainNo, e.getMessage()))
+                .onErrorReturn(0.0);
     }
 }

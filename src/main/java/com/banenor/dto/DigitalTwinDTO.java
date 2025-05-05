@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class VirtualAssetDTO {
+public class DigitalTwinDTO {
     /**
      * Identifier for the digital twin asset (typically the train number).
      */

@@ -323,7 +323,22 @@ CREATE TABLE IF NOT EXISTS user_dashboard_settings (
 );
 
 -- ==========================================================
--- 6. Digital Twins
+-- 6. Alert History
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS alert_history (
+    id             SERIAL PRIMARY KEY,
+    subject        VARCHAR(255) NOT NULL,
+    text           TEXT NOT NULL,
+    timestamp      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    acknowledged   BOOLEAN    NOT NULL DEFAULT FALSE
+);
+
+-- Index to get most recent alerts quickly
+CREATE INDEX IF NOT EXISTS idx_alert_history_timestamp
+    ON alert_history(timestamp DESC);
+
+-- ==========================================================
+-- 7. Digital Twins
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS digital_twins (
     asset_id        INTEGER PRIMARY KEY,

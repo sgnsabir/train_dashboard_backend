@@ -5,9 +5,12 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.relational.core.mapping.Column;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Abstract base class for axle sensor measurements.
@@ -20,6 +23,9 @@ import java.time.LocalDateTime;
 @SuperBuilder
 @NoArgsConstructor(force = true)
 public abstract class AbstractAxles {
+
+    @Transient
+    private Map<String,Object> dynamicProperties = new HashMap<>();
 
     @Id
     @Column("axle_id")

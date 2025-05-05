@@ -1,8 +1,11 @@
 package com.banenor.service;
 
 import com.banenor.dto.SensorMetricsDTO;
-import com.banenor.dto.VirtualAssetDTO;
+import com.banenor.dto.DigitalTwinDTO;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+
+import java.util.Map;
 
 /**
  * Service interface for Digital Twin integration.
@@ -24,5 +27,8 @@ public interface DigitalTwinService {
      * @param assetId the asset identifier (e.g., train number).
      * @return a Mono emitting the VirtualAssetDTO representing the current state.
      */
-    Mono<VirtualAssetDTO> getTwinState(Integer assetId);
+    Mono<DigitalTwinDTO> getTwinState(Integer assetId);
+
+    Flux<DigitalTwinDTO> findTwinsByFilters(Map<String, Object> filters, int page, int size);
+    Mono<Long> countTwinsByFilters(Map<String, Object> filters);
 }
