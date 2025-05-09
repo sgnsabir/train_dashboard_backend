@@ -28,4 +28,7 @@ public class AggregatedMetricsResponse {
         this.average = null;
         this.message = message;
     }
+
+    public AggregatedMetricsResponse(Void aggregatedData) {
+    }
 }

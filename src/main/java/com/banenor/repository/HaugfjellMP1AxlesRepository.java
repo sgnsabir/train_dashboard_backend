@@ -1,5 +1,6 @@
 package com.banenor.repository;
 
+import com.banenor.dto.SensorAggregationDTO;
 import com.banenor.model.HaugfjellMP1Axles;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
@@ -15,6 +16,27 @@ public interface HaugfjellMP1AxlesRepository extends R2dbcRepository<HaugfjellMP
     // ──────────────────────────────────────────────────────────────────────────
     // 1. RAW DATA ACCESS
     // ──────────────────────────────────────────────────────────────────────────
+
+    @Query("""
+                    SELECT vit,
+                           AVG(spd_tp1 + spd_tp2 + spd_tp3 + spd_tp5 + spd_tp6 + spd_tp8) / 6.0 AS avg_speed,
+                           MIN(LEAST(spd_tp1, spd_tp2, spd_tp3, spd_tp5, spd_tp6, spd_tp8)) AS min_speed,
+                           MAX(GREATEST(spd_tp1, spd_tp2, spd_tp3, spd_tp5, spd_tp6, spd_tp8)) AS max_speed
+                    FROM haugfjell_mp1_axles
+                    WHERE created_at BETWEEN :startDate AND :endDate
+                    GROUP BY vit
+            """)
+    Flux<SensorAggregationDTO> aggregateSensorDataByRange(LocalDateTime startDate, LocalDateTime endDate);
+
+    interface SpeedDynamicAggregation {
+        String getVit();
+
+        Double getAvgSpeed();
+
+        Double getMinSpeed();
+
+        Double getMaxSpeed();
+    }
 
     // 1.1 Fetch all records for a train
     @Query("SELECT * FROM haugfjell_mp1_axles WHERE train_no = :trainNo")
@@ -53,18 +75,6 @@ public interface HaugfjellMP1AxlesRepository extends R2dbcRepository<HaugfjellMP
             GROUP BY vit
             """)
     Flux<SpeedDynamicAggregation> findDynamicSpeedAggregationsByTrainNo(Integer trainNo);
-
-    interface SpeedDynamicAggregation {
-        String getVit();
-
-        Double getAvgSpeed();
-
-        Double getMinSpeed();
-
-        Double getMaxSpeed();
-
-        Double getAvgSquareSpeed();
-    }
 
     // 2.2 Angle of Attack
     @Query("""

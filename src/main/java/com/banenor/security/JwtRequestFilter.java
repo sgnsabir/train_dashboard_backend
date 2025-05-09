@@ -7,6 +7,7 @@ import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.http.HttpCookie;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
@@ -17,7 +18,9 @@ import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
 
-import java.util.*;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -28,6 +31,7 @@ public class JwtRequestFilter implements WebFilter {
     private final JwtTokenUtil jwtTokenUtil;
     private final CacheManager cacheManager;
 
+    // Map of path prefixes to roles allowed
     private static final Map<String, List<String>> roleAccessMap = Map.of(
             "/api/v1/admin", List.of("ROLE_ADMIN"),
             "/api/v1/maintenance", List.of("ROLE_ENGINEER", "ROLE_ADMIN")
@@ -35,88 +39,94 @@ public class JwtRequestFilter implements WebFilter {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
-        final String path = exchange.getRequest().getPath().value().toLowerCase();
-
-        logHeadersAndCookies(exchange);
-
-        if ("OPTIONS".equalsIgnoreCase(exchange.getRequest().getMethod().name())) {
-            log.debug("Skipping authentication for preflight OPTIONS request");
+        // Bypass JWT for WebSocket streaming endpoint
+        String rawPath = exchange.getRequest().getPath().value();
+        if ("/ws/stream".equals(rawPath)) {
+            log.debug("Skipping JWT for WS stream endpoint: {}", rawPath);
             return chain.filter(exchange);
         }
 
+        String path = rawPath.toLowerCase();
+        logRequestDetails(exchange);
+
+        // Skip preflight
+        if (HttpMethod.OPTIONS.equals(exchange.getRequest().getMethod())) {
+            log.debug("Skipping auth for OPTIONS request");
+            return chain.filter(exchange);
+        }
+
+        // Skip public routes
         if (isPublicPath(path)) {
-            log.debug("Public path, skipping JWT processing: {}", path);
+            log.debug("Public path, no JWT required: {}", path);
             return chain.filter(exchange);
         }
 
-        final String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
+        // Extract Bearer token
+        String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            log.warn("Missing or invalid Authorization header on path: {}", path);
+            log.warn("No Bearer token provided on {}", path);
             return unauthorized(exchange, "Missing Bearer token");
         }
+        String token = authHeader.substring(7);
+        log.debug("Token received: {}", mask(token));
 
-        final String token = authHeader.substring(7);
-        log.debug("Token received: {}", maskToken(token));
-
+        // Check blacklist
         Cache blacklist = cacheManager.getCache("jwtBlacklist");
         if (blacklist != null && Boolean.TRUE.equals(blacklist.get(token, Boolean.class))) {
-            log.warn("JWT is blacklisted: {}", maskToken(token));
-            return unauthorized(exchange, "Blacklisted token");
+            log.warn("Blacklisted token: {}", mask(token));
+            return unauthorized(exchange, "Token blacklisted");
         }
 
+        // Parse username
         String username;
         try {
             username = jwtTokenUtil.getUsernameFromToken(token);
         } catch (Exception e) {
-            log.error("Token extraction error: {}", e.getMessage());
-            return unauthorized(exchange, "Token parse failed");
+            log.error("Failed to parse token: {}", e.getMessage());
+            return unauthorized(exchange, "Invalid token format");
         }
-
         if (username == null || username.isBlank()) {
-            log.warn("Token missing username");
+            log.warn("Token subject empty");
             return unauthorized(exchange, "Invalid token subject");
         }
 
-        final String extractedUsername = username;
-        return userDetailsService.findByUsername(extractedUsername)
+        String userKey = username.trim().toLowerCase();
+        return userDetailsService.findByUsername(userKey)
                 .flatMap(user -> {
                     if (!user.isEnabled()) {
-                        log.warn("User is disabled: {}", extractedUsername);
-                        return unauthorized(exchange, "Disabled user");
+                        log.warn("Disabled user: {}", userKey);
+                        return unauthorized(exchange, "User disabled");
                     }
-
-                    boolean isValid;
+                    // Validate signature & expiration
+                    boolean valid;
                     try {
-                        isValid = jwtTokenUtil.validateToken(token, extractedUsername);
-                    } catch (Exception e) {
-                        log.error("Validation failed: {}", e.getMessage());
+                        valid = jwtTokenUtil.validateToken(token, userKey);
+                    } catch (Exception ex) {
+                        log.error("Token validation exception: {}", ex.getMessage());
                         return unauthorized(exchange, "Token validation failed");
                     }
-
-                    if (!isValid) {
-                        log.warn("Invalid token for user: {}", extractedUsername);
+                    if (!valid) {
+                        log.warn("Invalid token for {}", userKey);
                         return unauthorized(exchange, "Invalid token");
                     }
-
-                    if (!isAuthorizedForPath(path, user.getAuthorities())) {
-                        log.warn("Access denied for user {} on path {}", extractedUsername, path);
-                        return forbidden(exchange, "Insufficient role for this endpoint");
+                    // Enforce RBAC
+                    if (!isAuthorized(path, user.getAuthorities())) {
+                        log.warn("Access denied for {} on {}", userKey, path);
+                        return forbidden(exchange, "Access denied");
                     }
-
-                    UsernamePasswordAuthenticationToken authentication =
+                    UsernamePasswordAuthenticationToken auth =
                             new UsernamePasswordAuthenticationToken(user, null, user.getAuthorities());
-
-                    log.info("Authenticated user '{}' with roles {}", extractedUsername, user.getAuthorities());
+                    log.info("Authenticated {} with {}", userKey, user.getAuthorities());
                     return chain.filter(exchange)
-                            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication));
+                            .contextWrite(ReactiveSecurityContextHolder.withAuthentication(auth));
                 })
                 .switchIfEmpty(Mono.defer(() -> {
-                    log.warn("No user found with username from token: {}", extractedUsername);
+                    log.warn("User not found: {}", userKey);
                     return unauthorized(exchange, "Unknown user");
                 }))
-                .onErrorResume(ex -> {
-                    log.error("Unexpected error: {}", ex.getMessage(), ex);
-                    return unauthorized(exchange, "Processing error");
+                .onErrorResume(err -> {
+                    log.error("Auth error: {}", err.getMessage(), err);
+                    return unauthorized(exchange, "Authentication error");
                 });
     }
 
@@ -130,57 +140,52 @@ public class JwtRequestFilter implements WebFilter {
                 || path.startsWith("/actuator/");
     }
 
-    private boolean isAuthorizedForPath(String path, Collection<? extends GrantedAuthority> authorities) {
+    private boolean isAuthorized(String path, Collection<? extends GrantedAuthority> auths) {
         return roleAccessMap.entrySet().stream()
-                .filter(entry -> path.startsWith(entry.getKey()))
-                .allMatch(entry ->
-                        entry.getValue().stream()
-                                .anyMatch(requiredRole ->
-                                        authorities.stream().anyMatch(auth -> auth.getAuthority().equals(requiredRole))
-                                )
+                .filter(e -> path.startsWith(e.getKey()))
+                .allMatch(e -> e.getValue().stream()
+                        .anyMatch(role -> auths.stream()
+                                .anyMatch(a -> a.getAuthority().equals(role))
+                        )
                 );
     }
 
-    private Mono<Void> unauthorized(ServerWebExchange exchange, String reason) {
-        log.debug("Responding with 401 Unauthorized: {}", reason);
-        exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-        return exchange.getResponse().setComplete();
+    private Mono<Void> unauthorized(ServerWebExchange ex, String reason) {
+        log.debug("401: {}", reason);
+        ex.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
+        return ex.getResponse().setComplete();
     }
 
-    private Mono<Void> forbidden(ServerWebExchange exchange, String reason) {
-        log.debug("Responding with 403 Forbidden: {}", reason);
-        exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
-        return exchange.getResponse().setComplete();
+    private Mono<Void> forbidden(ServerWebExchange ex, String reason) {
+        log.debug("403: {}", reason);
+        ex.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+        return ex.getResponse().setComplete();
     }
 
-    private void logHeadersAndCookies(ServerWebExchange exchange) {
-        HttpHeaders headers = exchange.getRequest().getHeaders();
-        StringBuilder headerLog = new StringBuilder("Request Headers:\n");
-
-        headers.forEach((key, value) -> {
-            if (key.equalsIgnoreCase(HttpHeaders.AUTHORIZATION)) {
-                headerLog.append("  ").append(key).append(": ").append(maskToken(value.get(0))).append("\n");
-            } else {
-                headerLog.append("  ").append(key).append(": ").append(String.join(", ", value)).append("\n");
-            }
-        });
-
-        headerLog.append("Cookies:\n");
-        exchange.getRequest().getCookies().forEach((name, cookies) -> {
-            String cookieValue = cookies.stream()
-                    .map(HttpCookie::getValue)
-                    .findFirst()
-                    .map(this::maskToken)
-                    .orElse("N/A");
-            headerLog.append("  ").append(name).append(": ").append(cookieValue).append("\n");
-        });
-
-        log.info(headerLog.toString());
+    private void logRequestDetails(ServerWebExchange ex) {
+        var sb = new StringBuilder("Request ").append(ex.getRequest().getMethod())
+                .append(" ").append(ex.getRequest().getURI()).append("\nHeaders:\n");
+        ex.getRequest().getHeaders().forEach((k, v) ->
+                sb.append("  ").append(k).append(": ")
+                        .append(HttpHeaders.AUTHORIZATION.equalsIgnoreCase(k)
+                                ? mask(v.get(0))
+                                : String.join(",", v))
+                        .append("\n")
+        );
+        sb.append("Cookies:\n");
+        ex.getRequest().getCookies().forEach((n, c) ->
+                sb.append("  ").append(n).append(": ")
+                        .append(c.stream().findFirst()
+                                .map(HttpCookie::getValue)
+                                .map(this::mask)
+                                .orElse("n/a"))
+                        .append("\n")
+        );
+        log.info(sb.toString());
     }
 
-    private String maskToken(String token) {
-        return (token != null && token.length() > 10)
-                ? token.substring(0, 6) + "..." + token.substring(token.length() - 4)
-                : "******";
+    private String mask(String t) {
+        if (t == null || t.length() <= 10) return "******";
+        return t.substring(0, 6) + "..." + t.substring(t.length() - 4);
     }
 }

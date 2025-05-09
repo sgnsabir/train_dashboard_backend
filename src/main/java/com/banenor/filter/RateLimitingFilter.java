@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpMethod;
@@ -28,7 +29,6 @@ public class RateLimitingFilter implements WebFilter {
     private final ConcurrentHashMap<String, AtomicInteger> requestCounts = new ConcurrentHashMap<>();
     private final MeterRegistry meterRegistry;
 
-    // Increased defaults to support realtime streaming dashboards.
     @Value("${rate.limit.requests-per-minute:12000}")
     private int maxRequestsPerMinute;
 
@@ -46,14 +46,20 @@ public class RateLimitingFilter implements WebFilter {
 
     public RateLimitingFilter(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
-        // Register metrics for active client IP count.
         meterRegistry.gauge("rate_limiting.active_clients", requestCounts, ConcurrentHashMap::size);
     }
 
     @Override
     @NonNull
     public Mono<Void> filter(@NonNull ServerWebExchange exchange, @NonNull WebFilterChain chain) {
-        // Bypass rate limiting for OPTIONS (preflight) requests.
+        // Bypass for WebSocket upgrade requests
+        String upgrade = exchange.getRequest().getHeaders().getFirst(HttpHeaders.UPGRADE);
+        if ("websocket".equalsIgnoreCase(upgrade)) {
+            log.debug("Bypassing rate limiting for WebSocket upgrade: {}", exchange.getRequest().getURI());
+            return chain.filter(exchange);
+        }
+
+        // Bypass rate limiting for OPTIONS (preflight) requests
         if (HttpMethod.OPTIONS.equals(exchange.getRequest().getMethod())) {
             log.debug("Bypassing rate limiting for preflight OPTIONS request: {}", exchange.getRequest().getURI());
             return chain.filter(exchange);
@@ -64,28 +70,25 @@ public class RateLimitingFilter implements WebFilter {
         }
 
         return Mono.defer(() -> {
+            String clientIP;
             try {
-                // Extract client IP using IPUtils.
-                String xForwardedFor = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
-                String xRealIp = exchange.getRequest().getHeaders().getFirst("X-Real-IP");
-                String remoteAddress = exchange.getRequest().getRemoteAddress() != null
+                String xff = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
+                String xri = exchange.getRequest().getHeaders().getFirst("X-Real-IP");
+                String remote = exchange.getRequest().getRemoteAddress() != null
                         ? exchange.getRequest().getRemoteAddress().getAddress().getHostAddress()
                         : "unknown";
-                String clientIP = IPUtils.extractClientIP(xForwardedFor, xRealIp, remoteAddress);
+                clientIP = IPUtils.extractClientIP(xff, xri, remote);
 
                 log.debug("Processing request from client IP: {}", clientIP);
 
                 requestCounts.putIfAbsent(clientIP, new AtomicInteger(0));
                 int requests = requestCounts.get(clientIP).incrementAndGet();
-
-                // Record request metrics using a masked IP.
                 meterRegistry.counter("rate_limiting.requests", "client_ip", IPUtils.maskIP(clientIP)).increment();
 
                 if (requests > maxRequestsPerMinute) {
-                    // Allow bursts up to burstSize over the limit for a short duration.
                     if (requests <= maxRequestsPerMinute + burstSize) {
                         addRateLimitHeaders(exchange, requests);
-                        log.debug("Client IP {} is in burst limit range: {} requests", IPUtils.maskIP(clientIP), requests);
+                        log.debug("Client IP {} within burst limit: {} requests", IPUtils.maskIP(clientIP), requests);
                         return chain.filter(exchange)
                                 .doOnError(e -> handleFilterError(e, clientIP));
                     }
@@ -107,13 +110,12 @@ public class RateLimitingFilter implements WebFilter {
 
     private boolean shouldSkipRateLimit(ServerWebExchange exchange) {
         String path = exchange.getRequest().getPath().value().toLowerCase();
-        // Skip rate limiting for health check endpoints.
         return path.startsWith("/actuator/health") || path.startsWith("/actuator/info");
     }
 
     private Mono<Void> handleRateLimitExceeded(ServerWebExchange exchange, String clientIP) {
         meterRegistry.counter("rate_limiting.exceeded", "client_ip", IPUtils.maskIP(clientIP)).increment();
-        log.warn("Rate limit exceeded for IP: {}", IPUtils.maskIP(clientIP));
+        log.warn("Responding 429 for IP: {}", IPUtils.maskIP(clientIP));
 
         exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
@@ -121,11 +123,11 @@ public class RateLimitingFilter implements WebFilter {
         exchange.getResponse().getHeaders().set("X-RateLimit-Remaining", "0");
         exchange.getResponse().getHeaders().set("Retry-After", "60");
 
-        String responseBody = String.format(
-                "{\"error\":\"Too Many Requests\",\"message\":\"Rate limit exceeded. Try again in 60 seconds.\",\"status\":%d}",
+        String body = String.format(
+                "{\"error\":\"Too Many Requests\",\"message\":\"Rate limit exceeded. Retry after 60s.\",\"status\":%d}",
                 HttpStatus.TOO_MANY_REQUESTS.value()
         );
-        byte[] bytes = responseBody.getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 
         return exchange.getResponse()
                 .writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(bytes)))
@@ -140,19 +142,21 @@ public class RateLimitingFilter implements WebFilter {
 
     private void handleFilterError(Throwable e, String clientIP) {
         log.error("Error processing request for IP {}: {}", IPUtils.maskIP(clientIP), e.getMessage());
-        meterRegistry.counter("rate_limiting.errors", "client_ip", IPUtils.maskIP(clientIP),
-                "error", e.getClass().getSimpleName()).increment();
+        meterRegistry.counter("rate_limiting.errors",
+                        "client_ip", IPUtils.maskIP(clientIP),
+                        "error", e.getClass().getSimpleName())
+                .increment();
     }
 
     @Scheduled(fixedRate = 60000)
     public void resetCounts() {
         try {
-            int previousSize = requestCounts.size();
+            int prev = requestCounts.size();
             requestCounts.clear();
-            log.debug("Rate limit counters reset. Cleared {} client entries", previousSize);
+            log.debug("Rate limit counters reset; cleared {} entries", prev);
             meterRegistry.counter("rate_limiting.resets").increment();
         } catch (Exception e) {
-            log.error("Error during rate limit counter reset: {}", e.getMessage(), e);
+            log.error("Error during rate limit reset: {}", e.getMessage(), e);
             meterRegistry.counter("rate_limiting.reset_errors").increment();
         }
     }
@@ -161,7 +165,7 @@ public class RateLimitingFilter implements WebFilter {
     public void cleanup() {
         try {
             if (requestCounts.size() > cleanupThreshold) {
-                log.warn("High number of rate limit entries ({}), performing cleanup", requestCounts.size());
+                log.warn("High entries ({})—performing emergency cleanup", requestCounts.size());
                 requestCounts.clear();
                 meterRegistry.counter("rate_limiting.emergency_cleanups").increment();
             }

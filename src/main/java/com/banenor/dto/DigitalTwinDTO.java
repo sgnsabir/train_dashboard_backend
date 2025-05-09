@@ -1,3 +1,4 @@
+// src/main/java/com/banenor/dto/DigitalTwinInsightDTO.java
 package com.banenor.dto;
 
 import lombok.AllArgsConstructor;
@@ -7,31 +8,36 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
 
-/**
- * Data Transfer Object representing the state of a digital twin for a train asset.
- */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class DigitalTwinDTO {
-    /**
-     * Identifier for the digital twin asset (typically the train number).
-     */
-    private Integer assetId;
+    /** The timestamp of the data point */
+    private LocalDateTime timestamp;
 
-    /**
-     * Current status of the asset (e.g., "Operational", "Maintenance Required").
-     */
+    /** The value of the metric (e.g., temperature, load, etc.) */
+    private Double value;
+
+    /** The type of insight (e.g., "wheelCondition", "bogieLoad", etc.) */
+    private String type;
+
+    /** The component to which the insight relates (e.g., "wheel", "bogie") */
+    private String component;
+
+    /** Optional field for location if available */
+    private String location;
+
+    /** Optional asset identifier if part of system context */
+    private String assetId;
+
+    /** Optional field for the status of the component or asset (e.g., "healthy", "faulty") */
     private String status;
 
-    /**
-     * Last updated timestamp of the digital twin.
-     */
-    private LocalDateTime updatedAt;
+    /** Optional risk level if applicable for the insight */
+    private RiskLevel riskLevel;
 
-    /**
-     * A summary string of key sensor metrics.
-     */
-    private String sensorSummary;
+    public enum RiskLevel {
+        LOW, MEDIUM, HIGH
+    }
 }

@@ -18,7 +18,8 @@ public class TrackConditionDTO {
     private Integer trainNo;
 
     /**
-     * Label for the measurement point, e.g. "TP1", "TP2", etc.
+     * Label for the measurement point, e.g., "TP1", "TP2", etc.
+     * This could be used for identifying specific measurement locations along the track.
      */
     private String measurementPoint;
 
@@ -61,4 +62,24 @@ public class TrackConditionDTO {
      * Descriptive message detailing any detected anomalies.
      */
     private String anomalyMessage;
+
+    /**
+     * GPS latitude of the vehicle.
+     */
+    private Double latitude;
+
+    /**
+     * GPS longitude of the vehicle.
+     */
+    private Double longitude;
+
+    /**
+     * Speed of the vehicle in kilometers per hour.
+     */
+    private Double speedKph;
+
+    /**
+     * Direction of travel in degrees (0° to 360°).
+     */
+    private Double directionDeg;
 }

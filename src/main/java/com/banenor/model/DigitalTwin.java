@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.relational.core.mapping.Column;
 import org.springframework.data.relational.core.mapping.Table;
 
 import java.time.LocalDateTime;
@@ -19,15 +20,30 @@ import java.time.LocalDateTime;
 public class DigitalTwin {
 
     @Id
-    private Integer assetId; // Asset identifier (e.g., train number)
+    @Column("id")
+    private Long id;
 
-    private String status; // e.g., "Operational", "Maintenance Required"
+    @Column("asset_id")
+    private Integer assetId;
 
-    private String sensorSummary; // Summary string of key sensor metrics
+    @Column("recorded_at")
+    private LocalDateTime recordedAt;
 
-    @CreatedDate
-    private LocalDateTime createdAt;
+    @Column("metric_value")
+    private Double metricValue;
 
-    @LastModifiedDate
-    private LocalDateTime updatedAt;
+    @Column("metric_type")
+    private String metricType;
+
+    @Column("component_name")
+    private String componentName;
+
+    @Column("location")
+    private String location;
+
+    @Column("status")
+    private String status;
+
+    @Column("risk_score")
+    private Double riskScore;
 }

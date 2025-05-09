@@ -1,7 +1,8 @@
+// src/main/java/com/banenor/service/DigitalTwinService.java
 package com.banenor.service;
 
-import com.banenor.dto.SensorMetricsDTO;
 import com.banenor.dto.DigitalTwinDTO;
+import com.banenor.dto.SensorMetricsDTO;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -9,26 +10,27 @@ import java.util.Map;
 
 /**
  * Service interface for Digital Twin integration.
- * Provides methods to update and retrieve the digital twin state for train assets.
+ * Now produces streams of DigitalTwinDTO.
  */
 public interface DigitalTwinService {
 
     /**
-     * Updates the digital twin state for a given asset based on the latest sensor metrics.
-     *
-     * @param metrics Aggregated sensor metrics.
-     * @return a Mono signaling completion.
+     * Ingest new sensor metrics into the twin.
      */
     Mono<Void> updateTwin(SensorMetricsDTO metrics);
 
     /**
-     * Retrieves the current digital twin state for the specified asset.
-     *
-     * @param assetId the asset identifier (e.g., train number).
-     * @return a Mono emitting the VirtualAssetDTO representing the current state.
+     * Fetch the latest insight for a single asset.
      */
     Mono<DigitalTwinDTO> getTwinState(Integer assetId);
 
+    /**
+     * Query a paged stream of insights by arbitrary filters.
+     */
     Flux<DigitalTwinDTO> findTwinsByFilters(Map<String, Object> filters, int page, int size);
+
+    /**
+     * Count total insight records matching filters.
+     */
     Mono<Long> countTwinsByFilters(Map<String, Object> filters);
 }

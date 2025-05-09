@@ -1,9 +1,11 @@
+// src/main/java/com/banenor/config/KafkaConfig.java
 package com.banenor.config;
 
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Collections;
 
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -11,16 +13,15 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
-
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
-import org.springframework.util.StringUtils;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import reactor.kafka.receiver.KafkaReceiver;
@@ -31,14 +32,18 @@ import reactor.kafka.sender.SenderOptions;
 import com.banenor.dto.SensorDataDTO;
 import com.banenor.events.MaintenanceRiskEvent;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Configuration
 @EnableKafka
+@RequiredArgsConstructor
 public class KafkaConfig {
 
-    // ──── Bootstrap & Topics ───────────────────────────────────
+    private final MeterRegistry meterRegistry;
+    private final KafkaProperties kafkaProperties;
+
     @Value("${kafka.bootstrap-servers:kafka:9092}")
     private String bootstrapServers;
 
@@ -48,55 +53,49 @@ public class KafkaConfig {
     @Value("${app.kafka.maintenance-risk-topic:maintenance-risk-events}")
     private String maintenanceRiskTopic;
 
-    // ──── Consumer Groups ──────────────────────────────────────
     @Value("${spring.kafka.consumer.group-id:banenor-sensor-data-group}")
     private String sensorConsumerGroupId;
 
     @Value("${spring.kafka.consumer.risk.group-id:maintenance-risk-group}")
     private String riskConsumerGroupId;
 
-    // ──── Consumer Tuning ──────────────────────────────────────
     @Value("${kafka.consumer.max-poll-records:50}")
     private int maxPollRecords;
+
     @Value("${kafka.consumer.auto-offset-reset:earliest}")
     private String autoOffsetReset;
+
     @Value("${kafka.consumer.enable-auto-commit:false}")
     private boolean enableAutoCommit;
+
     @Value("${kafka.consumer.isolation-level:read_committed}")
     private String isolationLevel;
 
-    // ──── Producer Tuning ──────────────────────────────────────
     @Value("${kafka.producer.acks:all}")
     private String acks;
+
     @Value("${kafka.producer.retries:3}")
     private int retries;
+
     @Value("${kafka.producer.batch-size:16384}")
     private int batchSize;
 
-    private final MeterRegistry meterRegistry;
-
-    public KafkaConfig(MeterRegistry meterRegistry) {
-        this.meterRegistry = meterRegistry;
-        // Expose basic config via metrics
-        meterRegistry.gauge("kafka.config.bootstrap_servers", bootstrapServers, String::length);
-        meterRegistry.gauge("kafka.config.sensor_topic", sensorTopic, String::length);
-        meterRegistry.gauge("kafka.config.risk_topic", maintenanceRiskTopic, String::length);
-    }
-
     private void validateConfiguration() {
-        if (!StringUtils.hasText(bootstrapServers)) {
+        if (bootstrapServers == null || bootstrapServers.isBlank()) {
             meterRegistry.counter("kafka.config.errors", "param", "bootstrapServers").increment();
             throw new IllegalStateException("Kafka bootstrap servers must be configured");
         }
-        if (!StringUtils.hasText(sensorConsumerGroupId) || !StringUtils.hasText(riskConsumerGroupId)) {
-            meterRegistry.counter("kafka.config.errors", "param", "consumerGroupId").increment();
-            throw new IllegalStateException("Kafka consumer group IDs must be configured");
-        }
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Imperative String Producer
-    // ──────────────────────────────────────────────────────────
+    @Bean
+    public KafkaAdmin kafkaAdmin() {
+        Map<String, Object> props = new HashMap<>();
+        props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        KafkaAdmin admin = new KafkaAdmin(props);
+        admin.setFatalIfBrokerNotAvailable(false);
+        return admin;
+    }
+
     @Bean
     public Map<String, Object> stringProducerConfigs() {
         Map<String, Object> props = new HashMap<>();
@@ -119,9 +118,6 @@ public class KafkaConfig {
         return new KafkaTemplate<>(stringProducerFactory());
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Imperative MaintenanceRiskEvent Producer
-    // ──────────────────────────────────────────────────────────
     @Bean
     public Map<String, Object> riskEventProducerConfigs() {
         Map<String, Object> props = new HashMap<>(stringProducerConfigs());
@@ -140,19 +136,11 @@ public class KafkaConfig {
         return new KafkaTemplate<>(riskEventProducerFactory());
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Reactive MaintenanceRiskEvent Producer (Reactor Kafka)
-    // ──────────────────────────────────────────────────────────
     @Bean
     public KafkaSender<String, MaintenanceRiskEvent> reactiveRiskEventKafkaSender() {
-        SenderOptions<String, MaintenanceRiskEvent> senderOptions =
-                SenderOptions.create(riskEventProducerConfigs());
-        return KafkaSender.create(senderOptions);
+        return KafkaSender.create(SenderOptions.create(riskEventProducerConfigs()));
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Imperative String Consumer (for SensorData, etc.)
-    // ──────────────────────────────────────────────────────────
     @Bean
     public Map<String, Object> consumerConfigs() {
         validateConfiguration();
@@ -174,8 +162,7 @@ public class KafkaConfig {
     }
 
     @Bean(name = "stringKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String>
-    kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory() {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, String>();
         factory.setConsumerFactory(consumerFactory());
         factory.setConcurrency(3);
@@ -183,12 +170,8 @@ public class KafkaConfig {
         return factory;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Imperative JSON Consumer for MaintenanceRiskEvent
-    // ──────────────────────────────────────────────────────────
     @Bean
     public Map<String, Object> riskConsumerConfigs() {
-        // start with the base sensor consumer props, then override:
         Map<String, Object> props = new HashMap<>(consumerConfigs());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, riskConsumerGroupId);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
@@ -204,17 +187,11 @@ public class KafkaConfig {
                 new JsonDeserializer<>(MaintenanceRiskEvent.class, false)
                         .trustedPackages("com.banenor.events")
                         .ignoreTypeHeaders();
-
-        return new DefaultKafkaConsumerFactory<>(
-                riskConsumerConfigs(),
-                new StringDeserializer(),
-                deserializer
-        );
+        return new DefaultKafkaConsumerFactory<>(riskConsumerConfigs(), new StringDeserializer(), deserializer);
     }
 
     @Bean(name = "riskKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, MaintenanceRiskEvent>
-    riskKafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, MaintenanceRiskEvent> riskKafkaListenerContainerFactory() {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, MaintenanceRiskEvent>();
         factory.setConsumerFactory(riskConsumerFactory());
         factory.setConcurrency(3);
@@ -222,13 +199,9 @@ public class KafkaConfig {
         return factory;
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Reactive JSON Receiver for SensorDataDTO (Reactor Kafka)
-    // ──────────────────────────────────────────────────────────
     @Bean
     public KafkaReceiver<String, SensorDataDTO> sensorDataKafkaReceiver() {
         validateConfiguration();
-
         Map<String, Object> props = new HashMap<>(consumerConfigs());
         props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, SensorDataDTO.class.getName());
         props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.banenor.dto");
@@ -247,12 +220,9 @@ public class KafkaConfig {
         return KafkaReceiver.create(receiverOptions);
     }
 
-    // ──────────────────────────────────────────────────────────
-    // Topic Auto-Creation for MaintenanceRiskEvent
-    // ──────────────────────────────────────────────────────────
     @Bean
     public NewTopic maintenanceRiskTopic() {
-        log.info("Ensuring topic '{}' exists (partitions=3, replicas=1)", maintenanceRiskTopic);
-        return new NewTopic(maintenanceRiskTopic, 3, (short)1);
+        log.info("Ensuring topic '{}' exists", maintenanceRiskTopic);
+        return new NewTopic(maintenanceRiskTopic, 3, (short) 1);
     }
 }

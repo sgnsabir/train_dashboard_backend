@@ -39,4 +39,7 @@ public class SensorAggregationDTO {
     private Double minLateralVibrationLeft;
     private Double maxLateralVibrationLeft;
     private Double lateralVibrationLeftVariance;
+
+    private  String vit;
+    private  Double avgSpeed;
 }

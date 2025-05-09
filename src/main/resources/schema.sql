@@ -341,9 +341,17 @@ CREATE INDEX IF NOT EXISTS idx_alert_history_timestamp
 -- 7. Digital Twins
 -- ==========================================================
 CREATE TABLE IF NOT EXISTS digital_twins (
-    asset_id        INTEGER PRIMARY KEY,
-    status          VARCHAR(100) NOT NULL,
-    sensor_summary  TEXT,
-    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id               BIGSERIAL PRIMARY KEY,
+    asset_id         INTEGER   NOT NULL,
+    recorded_at      TIMESTAMP NOT NULL,
+    metric_value     DOUBLE PRECISION NOT NULL,
+    metric_type      VARCHAR(100)  NOT NULL,
+    component_name   VARCHAR(100)  NOT NULL,
+    location         VARCHAR(200),
+    status           VARCHAR(100),
+    risk_score       DOUBLE PRECISION,
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_dtm_asset_time
+  ON digital_twins(asset_id, recorded_at DESC);

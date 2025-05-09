@@ -3,6 +3,7 @@ package com.banenor.kafka;
 import com.banenor.dto.SensorDataDTO;
 import com.banenor.service.DataService;
 import com.banenor.service.RealtimeAlertService;
+import com.banenor.websocket.WebSocketBroadcaster;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -30,6 +31,10 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Consumes sensor data from Kafka, processes it, triggers real-time alerts,
+ * and broadcasts sensor updates over WebSocket for frontend dashboards.
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -40,28 +45,22 @@ public class SensorDataConsumer {
     private final RealtimeAlertService alertService;
     private final MeterRegistry meterRegistry;
     private final ObjectMapper objectMapper;
+    private final WebSocketBroadcaster broadcaster;
 
     @Value("${kafka.sensor.topic:sensor-data-topic}")
     private String sensorTopic;
-
     @Value("${spring.kafka.consumer.group-id:banenor-sensor-data-group}")
     private String consumerGroupId;
-
     @Value("${kafka.consumer.max-retry-attempts:3}")
     private int maxRetryAttempts;
-
     @Value("${kafka.consumer.retry-delay-ms:1000}")
     private long retryDelayMs;
-
     @Value("${kafka.consumer.batch-size:100}")
     private int batchSize;
-
     @Value("${alert.default-email}")
     private String defaultAlertEmail;
-
     @Value("${kafka.consumer.shutdown-timeout-seconds:30}")
     private int shutdownTimeoutSeconds;
-
     @Value("${kafka.consumer.health-check-enabled:true}")
     private boolean healthCheckEnabled;
 
@@ -73,7 +72,7 @@ public class SensorDataConsumer {
     @PostConstruct
     public void init() {
         this.processingTimer = Timer.builder("sensor.data.processing")
-                .description("Time taken to process sensor data")
+                .description("Latency of sensor data processing pipeline")
                 .publishPercentiles(0.5, 0.95, 0.99)
                 .register(meterRegistry);
     }
@@ -103,11 +102,11 @@ public class SensorDataConsumer {
                             .doBeforeRetry(signal -> {
                                 healthy.set(false);
                                 lastError = signal.failure();
-                                log.warn("Consumer retry #{}, due to {}", signal.totalRetries(), signal.failure().getMessage());
+                                log.warn("Kafka consumer retry #{} due to {}", signal.totalRetries(), signal.failure().getMessage());
                             }))
                     .subscribe();
 
-            log.info("Started Kafka sensor-data consumer for topic {}", sensorTopic);
+            log.info("Kafka consumer started for topic='{}', group='{}'", sensorTopic, consumerGroupId);
         }
     }
 
@@ -119,14 +118,12 @@ public class SensorDataConsumer {
                 return org.springframework.boot.actuate.health.Health.unknown().build();
             }
             if (!isRunning.get()) {
-                return org.springframework.boot.actuate.health.Health.down()
-                        .withDetail("reason", "Consumer not running")
-                        .build();
+                return org.springframework.boot.actuate.health.Health.down().withDetail("reason", "Consumer not running").build();
             }
             if (!healthy.get()) {
                 return org.springframework.boot.actuate.health.Health.down()
-                        .withDetail("reason", "Consumer unhealthy")
-                        .withDetail("lastError", lastError != null ? lastError.getMessage() : "Unknown")
+                        .withDetail("reason", "Unhealthy consumer")
+                        .withDetail("lastError", lastError != null ? lastError.getMessage() : "none")
                         .build();
             }
             return org.springframework.boot.actuate.health.Health.up()
@@ -147,36 +144,41 @@ public class SensorDataConsumer {
                         "train_no", String.valueOf(sensorData.getTrainNo()))
                 .increment();
 
-        // capture start time
         long start = System.nanoTime();
 
-        Mono<Void> processingChain = Mono.defer(() -> {
+        Mono<Void> pipeline = Mono.defer(() -> {
                     String payload;
                     try {
                         payload = objectMapper.writeValueAsString(sensorData);
                     } catch (JsonProcessingException e) {
-                        log.error("Failed to serialize sensor data: {}", e.getMessage(), e);
+                        log.error("Serialization error for sensorData={} : {}", sensorData, e.getMessage(), e);
                         return Mono.empty();
                     }
 
-                    // processing -> then alert
+                    // 1) Persist data
+                    // 2) Broadcast to WebSocket clients
+                    // 3) Trigger alerts
                     return dataService.processSensorData(payload)
+                            .then(Mono.fromRunnable(() -> {
+                                broadcaster.publish(sensorData, "SENSOR_DATA");
+                                log.debug("Broadcasted SENSOR_DATA for trainNo={}", sensorData.getTrainNo());
+                            }))
                             .then(alertService.monitorAndAlert(sensorData.getTrainNo(), defaultAlertEmail)
                                     .onErrorResume(ex -> {
-                                        log.warn("Alert failed for train {}: {}", sensorData.getTrainNo(), ex.getMessage());
+                                        log.warn("Alert dispatch failed for trainNo={} : {}", sensorData.getTrainNo(), ex.getMessage());
                                         return Mono.empty();
                                     }));
                 })
                 .timeout(Duration.ofSeconds(30))
                 .retryWhen(Retry.backoff(maxRetryAttempts, Duration.ofMillis(retryDelayMs))
-                        .doBeforeRetry(signal -> log.warn("Retry #{} processing sensor data: {}",
-                                signal.totalRetries(), signal.failure().getMessage())))
+                        .doBeforeRetry(sig -> log.warn("Processing retry #{} for record offset={} : {}",
+                                sig.totalRetries(), record.offset(), sig.failure().getMessage())))
                 .doOnSuccess(v -> acknowledge(record))
                 .doOnError(e -> handlingProcessingError(record, e));
 
-        return processingChain.doFinally(signalType -> {
-            long end = System.nanoTime();
-            processingTimer.record(end - start, TimeUnit.NANOSECONDS);
+        return pipeline.doFinally(sig -> {
+            long duration = System.nanoTime() - start;
+            processingTimer.record(duration, TimeUnit.NANOSECONDS);
         });
     }
 
@@ -192,9 +194,11 @@ public class SensorDataConsumer {
     private void handlingProcessingError(ReceiverRecord<String, SensorDataDTO> record, Throwable error) {
         meterRegistry.counter("sensor.data.processing.failures",
                         "topic", record.topic(),
+                        "partition", String.valueOf(record.partition()),
                         "error", error.getClass().getSimpleName())
                 .increment();
-        log.error("Error processing record {}@{}: {}", record.topic(), record.partition(), error.getMessage(), error);
+        log.error("Error processing record topic={} partition={} offset={} : {}",
+                record.topic(), record.partition(), record.offset(), error.getMessage(), error);
     }
 
     private void handleConsumerError(Throwable error) {
@@ -202,6 +206,6 @@ public class SensorDataConsumer {
         meterRegistry.counter("sensor.data.consumer.errors",
                         "error", error.getClass().getSimpleName())
                 .increment();
-        log.error("Consumer error: {}", error.getMessage(), error);
+        log.error("Kafka consumer fatal error: {}", error.getMessage(), error);
     }
 }

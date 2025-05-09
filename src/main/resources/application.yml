@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: predictive-maintenance
+  main:
+    allow-bean-definition-overriding: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    enable:
+      all: false
+      jvm: true
+      process: true
+      http.server.requests: true
+  endpoint:
+    health:
+      show-details: always
+
+# expose our custom metrics
+micrometer:
+  metrics:
+    binders:
+      kafka: true
+      reactor:
+        tcp:
+          enabled: true
+
+# CORS for WebSocket handshake if frontend on different origin
+cors:
+  allowed-origins: "http://localhost:3000"
+  allowed-methods: GET,POST,OPTIONS
+  allowed-headers: "*"
