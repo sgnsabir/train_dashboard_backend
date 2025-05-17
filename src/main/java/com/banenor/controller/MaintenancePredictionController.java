@@ -1,7 +1,7 @@
 package com.banenor.controller;
 
 import com.banenor.dto.MaintenanceScheduleDTO;
-import com.banenor.dto.PredictiveMaintenanceDTO;
+import com.banenor.dto.PredictiveMaintenanceResponse;
 import com.banenor.service.PredictiveMaintenanceService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -37,7 +37,7 @@ public class MaintenancePredictionController {
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     @GetMapping("/predictive/{analysisId}")
-    public Mono<ResponseEntity<PredictiveMaintenanceDTO>> predictMaintenance(
+    public Mono<ResponseEntity<PredictiveMaintenanceResponse>> predictMaintenance(
             @PathVariable @Min(1) Integer analysisId,
             @RequestParam(defaultValue = "alerts@example.com") @Email String alertEmail) {
 

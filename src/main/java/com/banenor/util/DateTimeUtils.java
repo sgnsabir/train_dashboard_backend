@@ -20,7 +20,7 @@ public final class DateTimeUtils {
             // Parse using the standard ISO_DATE_TIME formatter.
             return LocalDateTime.parse(dateTimeStr, DateTimeFormatter.ISO_DATE_TIME);
         } catch (DateTimeParseException ex) {
-            // For production code, you might want to log this exception at a debug level.
+            // For production code, might want to log this exception at a debug level.
             return defaultValue;
         }
     }

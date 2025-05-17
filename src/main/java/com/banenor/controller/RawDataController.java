@@ -1,13 +1,16 @@
 package com.banenor.controller;
 
+import com.banenor.dto.RawDataPageRequest;
 import com.banenor.dto.RawDataResponse;
 import com.banenor.service.DataService;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springdoc.api.annotations.ParameterObject;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
+
+import jakarta.validation.constraints.Min;
 
 /**
  * Controller for fetching raw sensor data with paging and optional type filtering.
@@ -22,26 +25,33 @@ public class RawDataController {
     private final DataService dataService;
 
     /**
-     * Fetch paginated raw data responses for a given analysis ID, optionally filtered by sensor type.
+     * Fetch paginated raw data for a given analysis ID, optionally filtering by sensor type.
      *
-     * @param analysisId the analysis identifier (must be >= 1)
-     * @param sensorType optional sensor type to filter (e.g. "spd", "aoa")
-     * @param page       zero-based page index (must be >= 0)
-     * @param size       page size (must be >= 1)
-     * @return a Flux of RawDataResponse DTOs
+     * @param analysisId the analysis identifier (must be ≥ 1)
+     * @param pageReq    page & filter parameters
+     * @return flux of RawDataResponse
      */
     @GetMapping("/{analysisId}")
     public Flux<RawDataResponse> getRawData(
-            @PathVariable @Min(value = 1, message = "analysisId must be >= 1") Integer analysisId,
-            @RequestParam(required = false) String sensorType,
-            @RequestParam(defaultValue = "0") @Min(value = 0, message = "page must be >= 0") int page,
-            @RequestParam(defaultValue = "20") @Min(value = 1, message = "size must be >= 1") int size
+            @PathVariable @Min(value = 1, message = "analysisId must be >= 1")
+            Integer analysisId,
+            @ParameterObject @Validated
+            RawDataPageRequest pageReq
     ) {
-        log.debug("GET /api/raw/{}?sensorType={}&page={}&size={} called", analysisId, sensorType, page, size);
+        log.debug("GET /api/v1/raw/{}?sensorType={}&page={}&size={}",
+                analysisId,
+                pageReq.getSensorType(),
+                pageReq.getPage(),
+                pageReq.getSize());
 
-        return dataService.getRawData(analysisId, sensorType, page, size)
+        return dataService.getRawData(
+                        analysisId,
+                        pageReq.getSensorType(),
+                        pageReq.getPage(),
+                        pageReq.getSize()
+                )
                 .doOnNext(dto -> log.trace("Emitting RawDataResponse: {}", dto))
-                .doOnComplete(() -> log.debug("Completed fetching raw data for analysisId={}", analysisId))
+                .doOnComplete(()  -> log.debug("Completed fetching raw data for analysisId={}", analysisId))
                 .doOnError(error -> log.error("Error fetching raw data for analysisId={}", analysisId, error));
     }
 }

@@ -2,7 +2,7 @@ package com.banenor.service;
 
 import org.springframework.stereotype.Service;
 
-import com.banenor.dto.PredictiveMaintenanceDTO;
+import com.banenor.dto.PredictiveMaintenanceResponse;
 import com.banenor.dto.SensorDataDTO;
 
 import reactor.core.publisher.Mono;
@@ -11,7 +11,7 @@ import reactor.core.publisher.Mono;
 public interface PredictiveMaintenanceService {
     Mono<Double> calculateRiskScore(Integer analysisId);
     Mono<String> analyzeMaintenanceRisk(Integer analysisId, String alertEmail);
-    Mono<PredictiveMaintenanceDTO> getMaintenanceAnalysis(Integer analysisId, String alertEmail);
+    Mono<PredictiveMaintenanceResponse> getMaintenanceAnalysis(Integer analysisId, String alertEmail);
     
     /**
      * Process incoming sensor data for predictive maintenance analysis.

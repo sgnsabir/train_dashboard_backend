@@ -10,7 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
@@ -18,7 +17,6 @@ import reactor.core.publisher.Mono;
 import java.security.Key;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -27,72 +25,74 @@ import java.util.stream.Collectors;
 public class JwtTokenUtil {
 
     @Value("${jwt.secret}")
-    private String jwtSecret;
+    private String jwtSecret;  // injected from application.properties or $JWT_SECRET
 
     @Value("${jwt.expiration-in-seconds}")
-    private Long jwtExpirationSeconds;
+    private Long jwtExpirationSeconds;  // injected from application.properties or $JWT_EXPIRATION_IN_SECONDS
 
-    private Key key;
+    private Key signingKey;
 
     @PostConstruct
     public void init() {
+        // Base64-decode once
         byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
         if (keyBytes.length < 64) {
-            throw new IllegalArgumentException("JWT secret must be at least 512 bits (64 bytes)");
+            throw new IllegalArgumentException(
+                    "JWT secret must decode to at least 512 bits (64 bytes)");
         }
-        this.key = Keys.hmacShaKeyFor(keyBytes);
+        this.signingKey = Keys.hmacShaKeyFor(keyBytes);
     }
 
     public String generateToken(String username, List<String> roles) {
         Date now = new Date();
-        Date expiryDate = new Date(now.getTime() + jwtExpirationSeconds * 1000);
+        Date expires = new Date(now.getTime() + jwtExpirationSeconds * 1000);
         return Jwts.builder()
                 .setSubject(username)
                 .claim("roles", roles)
                 .setIssuedAt(now)
-                .setExpiration(expiryDate)
-                .signWith(key, SignatureAlgorithm.HS512)
+                .setExpiration(expires)
+                .signWith(signingKey, SignatureAlgorithm.HS512)
                 .compact();
     }
 
     public String getUsernameFromToken(String token) {
-        return getClaimFromToken(token, claims -> claims.getSubject());
+        return getClaim(token, io.jsonwebtoken.Claims::getSubject);
     }
 
     public Date getExpirationDateFromToken(String token) {
-        return getClaimFromToken(token, claims -> claims.getExpiration());
+        return getClaim(token, io.jsonwebtoken.Claims::getExpiration);
     }
 
-    public <T> T getClaimFromToken(String token, Function<io.jsonwebtoken.Claims, T> claimsResolver) {
-        final io.jsonwebtoken.Claims claims = parseToken(token);
-        return claimsResolver.apply(claims);
+    public <T> T getClaim(String token, Function<io.jsonwebtoken.Claims, T> resolver) {
+        var claims = parse(token);
+        return resolver.apply(claims);
     }
 
-    private io.jsonwebtoken.Claims parseToken(String token) {
+    private io.jsonwebtoken.Claims parse(String token) {
         return Jwts.parserBuilder()
+                .setSigningKey(signingKey)
                 .setAllowedClockSkewSeconds(60)
-                .setSigningKey(key)
                 .build()
                 .parseClaimsJws(token)
                 .getBody();
     }
 
-    public boolean validateToken(String token, String username) {
+    public boolean validateToken(String token, String expectedUsername) {
         try {
-            String tokenUsername = getUsernameFromToken(token);
-            return tokenUsername != null && tokenUsername.equalsIgnoreCase(username);
+            String actual = getUsernameFromToken(token);
+            return actual != null && actual.equalsIgnoreCase(expectedUsername);
         } catch (JwtException ex) {
-            log.error("JWT validation failed: {}", ex.getMessage());
+            log.warn("JWT validation error: {}", ex.getMessage());
             return false;
         }
     }
 
     public boolean validateToken(String token) {
         try {
-            parseToken(token);
+            parse(token);
             return true;
         } catch (JwtException ex) {
-            log.error("Invalid JWT: {}", ex.getMessage());
+            log.warn("Invalid JWT: {}", ex.getMessage());
             return false;
         }
     }
@@ -100,27 +100,21 @@ public class JwtTokenUtil {
     @SuppressWarnings("unchecked")
     public Mono<Authentication> getAuthentication(String token) {
         try {
-            var claims = parseToken(token);
+            var claims   = parse(token);
             String username = claims.getSubject();
-
-            Object rolesObject = claims.get("roles");
-
-            List<String> roles;
-            if (rolesObject instanceof List<?>) {
-                roles = ((List<?>) rolesObject).stream()
-                        .map(Object::toString)
-                        .collect(Collectors.toList());
-            } else {
-                roles = List.of(); // fallback
-            }
-
-            List<GrantedAuthority> authorities = roles.stream()
+            Object raw      = claims.get("roles");
+            List<String> roles = (raw instanceof List<?>)
+                    ? ((List<?>) raw).stream()
+                    .map(Object::toString)
+                    .collect(Collectors.toList())
+                    : List.of();
+            var authorities = roles.stream()
                     .map(SimpleGrantedAuthority::new)
                     .collect(Collectors.toList());
-
-            return Mono.just(new UsernamePasswordAuthenticationToken(username, null, authorities));
+            return Mono.just(
+                    new UsernamePasswordAuthenticationToken(username, null, authorities));
         } catch (Exception ex) {
-            log.error("Authentication extraction failed: {}", ex.getMessage(), ex);
+            log.error("Failed to extract Authentication from token", ex);
             return Mono.error(ex);
         }
     }

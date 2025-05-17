@@ -11,7 +11,6 @@ import com.banenor.exception.UserNotFoundException;
 import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
 import com.banenor.security.JwtTokenUtil;
-
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
@@ -51,10 +50,14 @@ public class AuthServiceImpl implements AuthService {
     @Audit(action = "User Registration", resource = "User")
     public Mono<User> register(RegistrationRequest registrationRequest) {
         return userRepository.findByUsername(registrationRequest.getUsername())
-                .flatMap(existingUser -> Mono.<User>error(new UserAlreadyExistsException("Username is already taken")))
+                .flatMap(existingUser ->
+                        Mono.<User>error(new UserAlreadyExistsException("Username is already taken"))
+                )
                 .switchIfEmpty(
                         userRepository.findByEmail(registrationRequest.getEmail())
-                                .flatMap(existingEmail -> Mono.<User>error(new UserAlreadyExistsException("Email is already registered")))
+                                .flatMap(existingEmail ->
+                                        Mono.<User>error(new UserAlreadyExistsException("Email is already registered"))
+                                )
                                 .switchIfEmpty(Mono.defer(() -> {
                                     User user = User.builder()
                                             .username(registrationRequest.getUsername())
@@ -71,38 +74,57 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Audit(action = "User Login", resource = "Authentication")
     public Mono<LoginResponse> login(LoginRequest loginRequest) {
+        // --- EARLY GUARD: reject blank username/password immediately ---
+        if (loginRequest.getUsername() == null
+                || loginRequest.getUsername().trim().isEmpty()
+                || loginRequest.getPassword() == null
+                || loginRequest.getPassword().trim().isEmpty()) {
+            return Mono.error(new InvalidCredentialsException("Username and password are required"));
+        }
+
+        String username = loginRequest.getUsername().trim();
+        String password = loginRequest.getPassword().trim();
+
         return authenticationManager.authenticate(
-                        new UsernamePasswordAuthenticationToken(loginRequest.getUsername(), loginRequest.getPassword()))
+                        new UsernamePasswordAuthenticationToken(username, password)
+                )
                 .onErrorMap(BadCredentialsException.class,
-                        ex -> new InvalidCredentialsException("Incorrect username or password", ex))
-                .switchIfEmpty(Mono.error(new InvalidCredentialsException("Incorrect username or password")))
-                .map(auth -> loginRequest.getUsername())
-                .flatMap(username ->
-                        userDetailsService.findByUsername(username)
-                                .map(userDetails -> {
-                                    List<String> roles = userDetails.getAuthorities().stream()
-                                            .map(grantedAuthority -> grantedAuthority.getAuthority())
-                                            .collect(Collectors.toList());
+                        ex -> new InvalidCredentialsException("Incorrect username or password", ex)
+                )
+                .switchIfEmpty(
+                        Mono.error(new InvalidCredentialsException("Incorrect username or password"))
+                )
+                // at this point authentication succeeded
+                .map(auth -> username)
+                .flatMap(u -> userDetailsService.findByUsername(u))
+                .map(userDetails -> {
+                    // collect roles
+                    List<String> roles = userDetails.getAuthorities().stream()
+                            .map(grantedAuthority -> grantedAuthority.getAuthority())
+                            .collect(Collectors.toList());
 
-                                    String token = jwtTokenUtil.generateToken(userDetails.getUsername(), roles);
+                    // generate JWT
+                    String token = jwtTokenUtil.generateToken(userDetails.getUsername(), roles);
 
-                                    Date expirationDate = jwtTokenUtil.getExpirationDateFromToken(token);
-                                    long expiresIn = (expirationDate.getTime() - System.currentTimeMillis()) / 1000;
+                    // compute expiry
+                    Date expirationDate = jwtTokenUtil.getExpirationDateFromToken(token);
+                    long expiresIn = (expirationDate.getTime() - System.currentTimeMillis()) / 1000;
 
-                                    LoginResponse response = new LoginResponse();
-                                    response.setToken(token);
-                                    response.setUsername(userDetails.getUsername());
-                                    response.setExpiresIn(expiresIn);
-                                    return response;
-                                })
-                );
+                    // build response
+                    LoginResponse response = new LoginResponse();
+                    response.setToken(token);
+                    response.setUsername(userDetails.getUsername());
+                    response.setExpiresIn(expiresIn);
+                    response.setRoles(roles);                          // <<-- now set roles
+                    return response;
+                });
     }
 
     @Override
     @Audit(action = "User Logout", resource = "Authentication")
     public Mono<Void> logout(String token) {
         log.info("Logging out token: {}", token);
-        // Token blacklisting or session management can be added here.
+        // TODO: implement token blacklist if desired
         return Mono.empty();
     }
 
@@ -110,8 +132,10 @@ public class AuthServiceImpl implements AuthService {
     @Audit(action = "Password Reset", resource = "User")
     public Mono<Void> resetPassword(PasswordResetRequest passwordResetRequest) {
         return userRepository.findByEmail(passwordResetRequest.getEmail())
-                .switchIfEmpty(Mono.<User>error(new UserNotFoundException("User not found with email: "
-                        + passwordResetRequest.getEmail())))
+                .switchIfEmpty(Mono.<User>error(
+                        new UserNotFoundException("User not found with email: " +
+                                passwordResetRequest.getEmail()))
+                )
                 .flatMap(user -> {
                     user.setPassword(passwordEncoder.encode(passwordResetRequest.getNewPassword()));
                     log.info("Resetting password for user: {}", user.getUsername());
@@ -123,7 +147,9 @@ public class AuthServiceImpl implements AuthService {
     @Audit(action = "Change Password", resource = "User")
     public Mono<Void> changePassword(String username, String oldPassword, String newPassword) {
         return userRepository.findByUsername(username)
-                .switchIfEmpty(Mono.error(new UserNotFoundException("User not found with username: " + username)))
+                .switchIfEmpty(Mono.error(
+                        new UserNotFoundException("User not found with username: " + username))
+                )
                 .flatMap(user -> {
                     if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
                         return Mono.error(new BadCredentialsException("Incorrect current password"));

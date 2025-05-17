@@ -3,7 +3,7 @@ package com.banenor.dto;
 import lombok.Data;
 
 @Data
-public class PredictiveMaintenanceDTO {
+public class PredictiveMaintenanceResponse {
     private Integer analysisId;
     private Double averageSpeed;
     private Double speedVariance;

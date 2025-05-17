@@ -1,16 +1,16 @@
 package com.banenor.controller;
 
-import com.banenor.dto.PredictiveMaintenanceDTO;
+import com.banenor.dto.PredictiveMaintenanceResponse;
+import com.banenor.dto.RealtimeAlertRequest;
 import com.banenor.service.PredictiveMaintenanceService;
 import com.banenor.service.RealtimeAlertService;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
-import io.swagger.v3.oas.annotations.Parameter;
-import jakarta.validation.constraints.Email;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +19,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -28,6 +29,7 @@ import java.time.Duration;
 import java.util.Optional;
 
 @Slf4j
+@Validated
 @RestController
 @RequestMapping("/api/v1/realtime")
 @Tag(name = "Realtime", description = "Realtime aliases for predictive maintenance and alerting")
@@ -48,20 +50,19 @@ public class RealtimeController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Predictive maintenance data retrieved successfully"),
-            @ApiResponse(responseCode = "400", description = "Invalid analysis ID"),
+            @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     @GetMapping("/metrics/{analysisId}")
-    public Mono<ResponseEntity<PredictiveMaintenanceDTO>> getLatestRealtimeMetrics(
-            @Parameter(description = "Analysis ID", required = true)
+    public Mono<ResponseEntity<PredictiveMaintenanceResponse>> getLatestRealtimeMetrics(
             @PathVariable @Min(1) Integer analysisId
     ) {
         meterRegistry.counter("realtime.metrics.requests", "analysisId", analysisId.toString()).increment();
 
-        return predictiveMaintenanceService
-                .getMaintenanceAnalysis(analysisId, DEFAULT_ALERT_EMAIL)
+        return predictiveMaintenanceService.getMaintenanceAnalysis(analysisId, DEFAULT_ALERT_EMAIL)
                 .map(dto -> {
                     meterRegistry.counter("realtime.metrics.success", "analysisId", analysisId.toString()).increment();
+                    log.info("Fetched realtime metrics for analysisId={}", analysisId);
                     return ResponseEntity.ok(dto);
                 })
                 .doOnError(ex -> {
@@ -80,35 +81,38 @@ public class RealtimeController {
     )
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Realtime alert processed successfully"),
-            @ApiResponse(responseCode = "400", description = "Invalid input"),
+            @ApiResponse(responseCode = "400", description = "Invalid input parameters"),
             @ApiResponse(responseCode = "500", description = "Processing error")
     })
-    @PostMapping("/alert/{analysisId}")
+    @PostMapping("/alert")
     public Mono<ResponseEntity<Void>> triggerRealtimeAlert(
-            @Parameter(description = "Analysis ID", required = true)
-            @PathVariable @Min(1) Integer analysisId,
-            @Parameter(description = "Email for alert notifications")
-            @RequestParam(defaultValue = DEFAULT_ALERT_EMAIL) @Email String alertEmail
+            @Valid @RequestBody RealtimeAlertRequest req
     ) {
+        Integer analysisId = req.getAnalysisId();
+        String alertEmail = req.getAlertEmail();
+
         meterRegistry.counter("realtime.alerts.requests",
                 "analysisId", analysisId.toString(),
                 "email", alertEmail).increment();
 
+        log.info("Triggering realtime alert for analysisId={} with email={}", analysisId, alertEmail);
+
         return realtimeAlertService.monitorAndAlert(analysisId, alertEmail)
                 .doOnSuccess(v -> {
                     meterRegistry.counter("realtime.alerts.success", "analysisId", analysisId.toString()).increment();
+                    log.info("Realtime alert processed successfully for analysisId={}", analysisId);
                     messagingTemplate.ifPresent(t ->
                             t.convertAndSend("/topic/alerts", "Realtime alert processed for analysisId: " + analysisId)
                     );
                 })
                 .thenReturn(ResponseEntity.ok().<Void>build())
-                .onErrorResume(ex -> {
+                .doOnError(ex -> {
                     meterRegistry.counter("realtime.alerts.errors",
                             "analysisId", analysisId.toString(),
                             "error", ex.getClass().getSimpleName()).increment();
                     log.error("Error triggering realtime alert for analysisId {}: {}", analysisId, ex.getMessage(), ex);
-                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
                 })
+                .onErrorResume(ex -> Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -117,7 +121,7 @@ public class RealtimeController {
             description = "Continuously stream predictive maintenance updates every 5 seconds"
     )
     @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<PredictiveMaintenanceDTO>> streamRealtimeMetrics(
+    public Flux<ServerSentEvent<PredictiveMaintenanceResponse>> streamRealtimeMetrics(
             @RequestParam("analysisId") @Min(1) Integer analysisId
     ) {
         log.info("Starting SSE stream for analysisId={}", analysisId);
@@ -127,11 +131,11 @@ public class RealtimeController {
                         predictiveMaintenanceService.getMaintenanceAnalysis(analysisId, DEFAULT_ALERT_EMAIL)
                                 .subscribeOn(Schedulers.boundedElastic())
                                 .onErrorResume(ex -> {
-                                    log.error("Error in SSE stream for analysisId {}: {}", analysisId, ex.getMessage());
+                                    log.error("Error in SSE stream for analysisId {}: {}", analysisId, ex.getMessage(), ex);
                                     return Mono.empty();
                                 })
                 )
-                .map(data -> ServerSentEvent.<PredictiveMaintenanceDTO>builder()
+                .map(data -> ServerSentEvent.<PredictiveMaintenanceResponse>builder()
                         .id(Long.toString(System.currentTimeMillis()))
                         .event("predictive-maintenance-update")
                         .data(data)

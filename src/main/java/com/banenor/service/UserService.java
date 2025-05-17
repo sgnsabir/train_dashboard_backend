@@ -1,3 +1,4 @@
+// src/main/java/com/banenor/service/UserService.java
 package com.banenor.service;
 
 import com.banenor.controller.ProfileController.ProfileUpdateRequest;
@@ -8,6 +9,7 @@ import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -38,6 +40,18 @@ public class UserService {
         return userRepository.findById(id)
                 .map(this::mapToUserResponse)
                 .doOnError(e -> log.error("Error fetching user by id {}: {}", id, e.getMessage(), e));
+    }
+
+    /**
+     * Provide a raw User entity by username.
+     * <p>
+     * This is the method other services (e.g. AuthService) can call
+     * when they need the full User (including password, roles, etc.).
+     */
+    public Mono<User> findByUsername(String username) {
+        return userRepository.findByUsername(username)
+                .switchIfEmpty(Mono.error(new UsernameNotFoundException("User not found: " + username)))
+                .doOnError(e -> log.error("Error fetching user entity by username {}: {}", username, e.getMessage(), e));
     }
 
     /**
@@ -85,14 +99,6 @@ public class UserService {
                 .flatMap(user -> userRepository.delete(user))
                 .doOnSuccess(v -> log.info("Deleted user with ID {}", id))
                 .doOnError(ex -> log.error("Error deleting user with ID {}: {}", id, ex.getMessage(), ex));
-    }
-
-    /**
-     * If you need the raw User entity (e.g. to pull roles or other fields).
-     */
-    public Mono<User> findEntityByUsername(String username) {
-        return userRepository.findByUsername(username)
-                .doOnError(e -> log.error("Error fetching user entity {}: {}", username, e.getMessage(), e));
     }
 
     /**

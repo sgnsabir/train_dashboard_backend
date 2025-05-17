@@ -6,9 +6,9 @@ import lombok.Data;
 /**
  * Data Transfer Object for aggregated sensor metrics.
  *
- * <p>This DTO aggregates various sensor measurements for a train analysis.
+ * This DTO aggregates various sensor measurements for a train analysis.
  * A new field 'createdAt' has been added to capture the timestamp of the sensor data,
- * ensuring that calls to getCreatedAt() resolve properly.</p>
+ * ensuring that calls to getCreatedAt() resolve properly.
  */
 @Data
 public class SensorMetricsDTO {

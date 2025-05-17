@@ -8,13 +8,10 @@ import lombok.NoArgsConstructor;
 
 /**
  * Data Transfer Object for Derailment Risk Analysis.
- *
- * <p>
  * Encapsulates key sensor values used for detecting derailment risk.
  * It includes vibration measurements (left and right), the maximum vibration observed,
  * the absolute time delay difference between left and right sensors, a risk flag,
  * and a descriptive anomaly message.
- * </p>
  */
 @Data
 @Builder

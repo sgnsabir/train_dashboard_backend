@@ -51,8 +51,7 @@ public class AggregationScheduler {
 
     /**
      * Aggregates the global average speed from both MP1 and MP3 repositories.
-     * Assumes that both repositories implement a method findGlobalAverageSpeed() returning Mono<Double>.
-     *
+     *  both repositories implement a method findGlobalAverageSpeed() returning Mono<Double>.
      * @return a Mono emitting the average of the two global speeds.
      */
     private Mono<Double> aggregateSpeedMetric() {

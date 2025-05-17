@@ -48,7 +48,7 @@ jobs:
       # (Optional) Deploy to staging environment if tests pass.
       # - name: Deploy to Staging
       #   run: echo "Deploying to staging environment..."
-      #   # Insert your deployment scripts/commands here.
+      #   # Insert deployment scripts/commands here.
 
   security-scan:
     runs-on: ubuntu-latest

@@ -1,15 +1,16 @@
 package com.banenor.controller;
 
 import com.banenor.dto.SegmentAnalysisDTO;
+import com.banenor.dto.SegmentAnalysisRequest;
 import com.banenor.service.SegmentAnalysisService;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -29,28 +30,14 @@ public class SegmentAnalysisController {
     /**
      * Fetches segment-based analysis for a train over a given time window.
      * Defaults to the last 7 days when dates are omitted.
-     *
-     * @param trainNo the train number (>0)
-     * @param start   optional ISO-date-time; defaults to now().minusDays(7)
-     * @param end     optional ISO-date-time; defaults to now()
      */
     @GetMapping
     public Flux<SegmentAnalysisDTO> getSegmentAnalysisData(
-            @RequestParam("trainNo")
-            @Min(value = 1, message = "trainNo must be greater than zero")
-            Integer trainNo,
-
-            @RequestParam(value = "start", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime start,
-
-            @RequestParam(value = "end", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime end
+            @Validated SegmentAnalysisRequest req
     ) {
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime resolvedStart = (start != null) ? start : now.minusDays(7);
-        LocalDateTime resolvedEnd   = (end   != null) ? end   : now;
+        LocalDateTime resolvedStart = (req.getStart() != null) ? req.getStart() : now.minusDays(7);
+        LocalDateTime resolvedEnd   = (req.getEnd()   != null) ? req.getEnd()   : now;
 
         if (resolvedEnd.isBefore(resolvedStart)) {
             log.warn("Invalid time window: end {} is before start {}", resolvedEnd, resolvedStart);
@@ -61,13 +48,13 @@ public class SegmentAnalysisController {
         }
 
         log.info("SegmentAnalysisController.getSegmentAnalysisData(trainNo={}, start={}, end={})",
-                trainNo, resolvedStart, resolvedEnd);
+                req.getTrainNo(), resolvedStart, resolvedEnd);
 
         return segmentAnalysisService
-                .analyzeSegmentData(trainNo, resolvedStart, resolvedEnd)
+                .analyzeSegmentData(req.getTrainNo(), resolvedStart, resolvedEnd)
                 .doOnError(ex -> log.error(
                         "Error fetching segment analysis for train {}: {}",
-                        trainNo, ex.getMessage(), ex))
+                        req.getTrainNo(), ex.getMessage(), ex))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 }

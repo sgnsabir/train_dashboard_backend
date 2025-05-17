@@ -1,24 +1,24 @@
 package com.banenor.controller;
 
 import com.banenor.dto.DerailmentRiskDTO;
+import com.banenor.dto.DerailmentRiskRequest;
 import com.banenor.service.DerailmentRiskService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.format.annotation.DateTimeFormat;
+import org.springdoc.api.annotations.ParameterObject;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
+import jakarta.validation.Valid;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
@@ -42,23 +42,12 @@ public class DerailmentRiskController {
     )
     @GetMapping
     public Flux<DerailmentRiskDTO> getDerailmentRiskData(
-            @RequestParam("trainNo")
-            @Min(value = 1, message = "trainNo must be at least 1")
-            Integer trainNo,
-
-            @RequestParam(value = "start", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime start,
-
-            @RequestParam(value = "end", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime end
+            @Valid @ParameterObject DerailmentRiskRequest req
     ) {
-        // apply defaults
-        LocalDateTime actualEnd = Optional.ofNullable(end).orElse(LocalDateTime.now());
-        LocalDateTime actualStart = Optional.ofNullable(start).orElse(actualEnd.minusDays(7));
+        Integer trainNo = req.getTrainNo();
+        LocalDateTime actualEnd = Optional.ofNullable(req.getEnd()).orElse(LocalDateTime.now());
+        LocalDateTime actualStart = Optional.ofNullable(req.getStart()).orElse(actualEnd.minusDays(7));
 
-        // validate range
         if (actualStart.isAfter(actualEnd)) {
             log.warn("Invalid date range: start={} is after end={}", actualStart, actualEnd);
             throw new ResponseStatusException(
@@ -67,10 +56,7 @@ public class DerailmentRiskController {
             );
         }
 
-        log.info(
-                "Fetching derailment risk for trainNo={} from {} to {}",
-                trainNo, actualStart, actualEnd
-        );
+        log.info("Fetching derailment risk for trainNo={} from {} to {}", trainNo, actualStart, actualEnd);
 
         return derailmentRiskService
                 .fetchDerailmentRiskData(trainNo, actualStart, actualEnd)

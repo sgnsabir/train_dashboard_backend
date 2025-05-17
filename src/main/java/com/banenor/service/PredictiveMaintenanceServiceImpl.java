@@ -7,7 +7,7 @@ import org.springframework.stereotype.Service;
 
 import com.banenor.ai.AIPredictiveMaintenanceService;
 import com.banenor.config.MaintenanceProperties;
-import com.banenor.dto.PredictiveMaintenanceDTO;
+import com.banenor.dto.PredictiveMaintenanceResponse;
 import com.banenor.dto.SensorDataDTO;
 import com.banenor.events.MaintenanceRiskEvent;
 import com.banenor.strategy.RiskCalculationStrategy;
@@ -64,7 +64,7 @@ public class PredictiveMaintenanceServiceImpl implements PredictiveMaintenanceSe
     }
 
     @Override
-    public Mono<PredictiveMaintenanceDTO> getMaintenanceAnalysis(Integer analysisId, String alertEmail) {
+    public Mono<PredictiveMaintenanceResponse> getMaintenanceAnalysis(Integer analysisId, String alertEmail) {
         // Compose reactive calls with circuit breaker protection around the AI prediction call.
         return dashboardService.getLatestMetrics(analysisId)
                 .flatMap(metrics ->
@@ -75,7 +75,7 @@ public class PredictiveMaintenanceServiceImpl implements PredictiveMaintenanceSe
                                                 .transformDeferred(CircuitBreakerOperator.of(circuitBreaker))
                                                 .defaultIfEmpty("AI prediction not configured.")
                                                 .map(aiPrediction -> {
-                                                    PredictiveMaintenanceDTO response = new PredictiveMaintenanceDTO();
+                                                    PredictiveMaintenanceResponse response = new PredictiveMaintenanceResponse();
                                                     response.setAnalysisId(analysisId);
                                                     response.setAverageSpeed(metrics.getAverageSpeed());
                                                     response.setSpeedVariance(metrics.getSpeedVariance());
@@ -98,7 +98,7 @@ public class PredictiveMaintenanceServiceImpl implements PredictiveMaintenanceSe
     @Override
     public Mono<String> analyzeMaintenanceRisk(Integer analysisId, String alertEmail) {
         return getMaintenanceAnalysis(analysisId, alertEmail)
-                .map(PredictiveMaintenanceDTO::getPredictionMessage);
+                .map(PredictiveMaintenanceResponse::getPredictionMessage);
     }
 
     @Override

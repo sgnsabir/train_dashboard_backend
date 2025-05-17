@@ -12,11 +12,8 @@ import java.time.LocalDateTime;
 /**
  * A proof-of-concept implementation of a reinforcement learning service.
  * Currently uses simple rule-based logic to decide whether immediate maintenance is required.
- *
- * <p>
- * Replace the rule-based logic with your RL algorithm or integrate with an external RL service
+ * will Replace the rule-based logic with  RL algorithm or integrate with an external RL service
  * as needed.
- * </p>
  */
 @Slf4j
 @Service

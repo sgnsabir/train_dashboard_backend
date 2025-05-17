@@ -1,22 +1,27 @@
 package com.banenor.controller;
 
 import com.banenor.dto.WheelConditionDTO;
+import com.banenor.dto.WheelConditionRequest;
 import com.banenor.service.WheelConditionService;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.constraints.Min;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
 
+/**
+ * Revised controller to use a single request DTO for wheel condition parameters.
+ */
 @RestController
 @RequestMapping(value = "/api/v1/wheel", produces = MediaType.APPLICATION_JSON_VALUE)
 @Validated
@@ -34,17 +39,12 @@ public class WheelConditionController {
      */
     @GetMapping
     public Flux<WheelConditionDTO> getWheelConditionData(
-            @RequestParam @Min(1) Integer trainNo,
-            @RequestParam(value = "start", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime start,
-            @RequestParam(value = "end", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime end
+            @Valid WheelConditionRequest req
     ) {
-        LocalDateTime from = Optional.ofNullable(start)
+        Integer trainNo = req.getTrainNo();
+        LocalDateTime from = Optional.ofNullable(req.getStart())
                 .orElse(LocalDateTime.now().minusDays(7));
-        LocalDateTime to = Optional.ofNullable(end)
+        LocalDateTime to = Optional.ofNullable(req.getEnd())
                 .orElse(LocalDateTime.now());
 
         log.info("Fetching wheel condition for trainNo={} from {} to {}", trainNo, from, to);

@@ -8,7 +8,6 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-    # remove broken healthcheck
     restart: always
     networks:
       - banenor-net
@@ -31,7 +30,6 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-    # remove broken healthcheck
     restart: always
     networks:
       - banenor-net
@@ -56,7 +54,6 @@ services:
     ports:
       - "1025:1025"
       - "8025:8025"
-    # remove broken nc check; MailHog’s web UI is on 8025
     restart: always
     networks:
       - banenor-net
@@ -79,16 +76,30 @@ services:
     ports:
       - "8080:8080"
     environment:
+      # Database
       - DB_HOST=host.docker.internal
       - DB_PORT=5432
       - DB_NAME=banenor_db
       - DB_USERNAME=postgres
       - DB_PASSWORD=0000
+
+      # Redis, Mail, Kafka, Zipkin
       - SPRING_REDIS_HOST=redis
       - SPRING_MAIL_HOST=mailhog
       - SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092
       - SPRING_ZIPKIN_ENABLED=false
+
+      # Active profile
       - SPRING_PROFILES_ACTIVE=test
+
+      # ===== JWT settings =====
+      # Must match your application.properties keys:
+      #   jwt.secret=<your Base64-encoded HS512 key>
+      #   jwt.expiration-in-seconds=<token TTL in seconds>
+      #
+      - JWT_SECRET=LIdBYLjt0H7NUnLOhp5bcjxvRt74V3QOWMRRP7asRljAHUbKpVI0XvfH2t6aVmQf5eGOiFLof3xQS50+sXhpZA==
+      - JWT_EXPIRATION_IN_SECONDS=3600
+
     depends_on:
       - kafka
       - redis
@@ -102,44 +113,6 @@ services:
     restart: always
     networks:
       - banenor-net
-
-#  maven:
-#    image: maven:3.9-eclipse-temurin-21
-#    container_name: banenor-maven
-#    working_dir: /app
-#    volumes:
-#      - ./:/app                            # your project sources
-#      - ./target/site:/app/target/site    # bind-mount host target/site
-#    entrypoint:
-#      - sh
-#      - -c
-#      - |
-#        # run tests
-#        mvn test -Dspring.profiles.active=test && \
-#        # generate the HTML report into target/site
-#        mvn org.apache.maven.plugins:maven-surefire-report-plugin:3.5.3-M8:report-only \
-#            -Dspring.profiles.active=test
-#    depends_on:
-#      - backend
-#    restart: "no"
-#    networks:
-#      - banenor-net
-#
-#  report-server:
-#    image: httpd:alpine
-#    container_name: report-server
-#    ports:
-#      - "8000:80"
-#    depends_on:
-#      - maven
-#    restart: always
-#    networks:
-#      - banenor-net
-#    volumes:
-#      - ./target/site:/usr/local/apache2/htdocs:ro
-#
-#volumes:
-#  integration-test-results:
 
 networks:
   banenor-net:

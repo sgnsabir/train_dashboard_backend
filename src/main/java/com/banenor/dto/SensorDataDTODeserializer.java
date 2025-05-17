@@ -16,7 +16,7 @@ public class SensorDataDTODeserializer implements Deserializer<SensorDataDTO> {
 
     @Override
     public void configure(Map<String, ?> configs, boolean isKey) {
-        // Optionally, you can configure the ObjectMapper here if needed.
+        // Optionally, can configure the ObjectMapper here if needed.
     }
 
     @Override

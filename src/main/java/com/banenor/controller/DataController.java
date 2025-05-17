@@ -1,5 +1,7 @@
 package com.banenor.controller;
 
+import com.banenor.dto.DetailedDataRequest;
+import com.banenor.dto.RawDataRequest;
 import com.banenor.dto.RawDataResponse;
 import com.banenor.dto.SensorMeasurementDTO;
 import com.banenor.exception.ResourceNotFoundException;
@@ -11,15 +13,17 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springdoc.api.annotations.ParameterObject;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+
+import jakarta.validation.constraints.Min;
 
 @RestController
 @RequestMapping("/api/v1/data")
@@ -57,17 +61,20 @@ public class DataController {
     @GetMapping("/raw/{analysisId}")
     public Mono<ResponseEntity<Flux<RawDataResponse>>> getRawSensorData(
             @PathVariable @Min(1) Integer analysisId,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(0) int size,
-            @RequestParam(required = false) String sensorType
+            @ParameterObject @Validated RawDataRequest request
     ) {
         return findHeader(analysisId)
                 .map(header -> {
                     log.debug("Streaming raw data for analysisId={}, sensorType={}, page={}, size={}",
-                            analysisId, sensorType, page, size);
+                            analysisId, request.getSensorType(), request.getPage(), request.getSize());
+
                     Flux<RawDataResponse> stream = dataService
-                            .getRawData(analysisId, sensorType, page, size)
+                            .getRawData(analysisId,
+                                    request.getSensorType(),
+                                    request.getPage(),
+                                    request.getSize())
                             .subscribeOn(Schedulers.boundedElastic());
+
                     return ResponseEntity.ok(stream);
                 })
                 .onErrorResume(ResourceNotFoundException.class, ex -> {
@@ -88,15 +95,19 @@ public class DataController {
     @GetMapping("/detailed/{analysisId}")
     public Mono<ResponseEntity<Flux<SensorMeasurementDTO>>> getDetailedSensorData(
             @PathVariable @Min(1) Integer analysisId,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(0) int size
+            @ParameterObject @Validated DetailedDataRequest request
     ) {
         return findHeader(analysisId)
                 .map(header -> {
-                    log.debug("Streaming detailed data for analysisId={}, page={}, size={}", analysisId, page, size);
+                    log.debug("Streaming detailed data for analysisId={}, page={}, size={}",
+                            analysisId, request.getPage(), request.getSize());
+
                     Flux<SensorMeasurementDTO> stream = dataService
-                            .getDetailedSensorData(analysisId, page, size)
+                            .getDetailedSensorData(analysisId,
+                                    request.getPage(),
+                                    request.getSize())
                             .subscribeOn(Schedulers.boundedElastic());
+
                     return ResponseEntity.ok(stream);
                 })
                 .onErrorResume(ResourceNotFoundException.class, ex -> {

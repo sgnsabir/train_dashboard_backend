@@ -1,13 +1,13 @@
 package com.banenor.controller;
 
 import com.banenor.dto.TrackConditionDTO;
+import com.banenor.dto.TrackConditionRequest;
 import com.banenor.service.TrackConditionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import jakarta.validation.constraints.Min;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.format.annotation.DateTimeFormat;
+import org.springdoc.api.annotations.ParameterObject;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
+import jakarta.validation.Valid;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -39,31 +40,23 @@ public class TrackConditionController {
             "application/x-ndjson"
     })
     public Flux<TrackConditionDTO> getTrackConditionData(
-            @RequestParam("trainNo")
-            @Min(value = 1, message = "trainNo must be ≥ 1")
-            Integer trainNo,
-
-            @RequestParam(value = "start", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime start,
-
-            @RequestParam(value = "end", required = false)
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME)
-            LocalDateTime end
+            @Valid @ParameterObject TrackConditionRequest req
     ) {
-        // Apply defaults if parameters are missing
+        // Determine window defaults
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime from = Optional.ofNullable(start).orElse(now.minusDays(7));
-        LocalDateTime to   = Optional.ofNullable(end).orElse(now);
+        LocalDateTime from = Optional.ofNullable(req.getStart()).orElse(now.minusDays(7));
+        LocalDateTime to   = Optional.ofNullable(req.getEnd()).orElse(now);
 
-        log.info("Fetching track condition [trainNo={}, from={}, to={}]", trainNo, from, to);
+        log.info("Fetching track condition [trainNo={}, from={}, to={}]",
+                req.getTrainNo(), from, to);
 
         return trackConditionService
-                .fetchTrackConditionData(trainNo, from, to)
+                .fetchTrackConditionData(req.getTrainNo(), from, to)
                 .onBackpressureLatest()
                 .sample(Duration.ofMillis(500))
                 .doOnError(ex ->
-                        log.error("Error streaming track condition for trainNo={}: {}", trainNo, ex.getMessage(), ex)
+                        log.error("Error streaming track condition for trainNo={}: {}",
+                                req.getTrainNo(), ex.getMessage(), ex)
                 )
                 .subscribeOn(Schedulers.boundedElastic());
     }

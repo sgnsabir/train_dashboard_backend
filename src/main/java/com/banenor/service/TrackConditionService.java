@@ -6,10 +6,7 @@ import java.time.LocalDateTime;
 
 /**
  * Service interface for analyzing track conditions based on sensor measurements.
- *
- * <p>
  * The service evaluates lateral and vertical forces from sensor data to detect potential track stress or geometry issues.
- * </p>
  */
 public interface TrackConditionService {
 
