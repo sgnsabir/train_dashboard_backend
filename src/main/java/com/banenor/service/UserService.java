@@ -24,39 +24,33 @@ public class UserService {
 
     private final UserRepository userRepository;
 
-    /**
-     * For AuthController: load UserResponse by username.
-     */
     public Mono<UserResponse> getUserByUsername(String username) {
         return userRepository.findByUsername(username)
                 .map(this::mapToUserResponse)
                 .doOnError(e -> log.error("Error fetching user by username {}: {}", username, e.getMessage(), e));
     }
 
-    /**
-     * For AuthController: load UserResponse by user ID.
-     */
     public Mono<UserResponse> getUserById(Long id) {
         return userRepository.findById(id)
                 .map(this::mapToUserResponse)
                 .doOnError(e -> log.error("Error fetching user by id {}: {}", id, e.getMessage(), e));
     }
 
-    /**
-     * Provide a raw User entity by username.
-     * <p>
-     * This is the method other services (e.g. AuthService) can call
-     * when they need the full User (including password, roles, etc.).
-     */
     public Mono<User> findByUsername(String username) {
         return userRepository.findByUsername(username)
                 .switchIfEmpty(Mono.error(new UsernameNotFoundException("User not found: " + username)))
                 .doOnError(e -> log.error("Error fetching user entity by username {}: {}", username, e.getMessage(), e));
     }
 
-    /**
-     * Retrieve all users (Admin only).
-     */
+    public Mono<User> findEntityByUsername(String username) {
+        return userRepository.findByUsername(username)
+                .switchIfEmpty(Mono.error(
+                        new UsernameNotFoundException("User not found: " + username)))
+                .doOnError(e -> log.error(
+                        "Error fetching raw user entity for {}: {}", username, e.getMessage(), e));
+    }
+
+
     public Flux<UserResponse> getAllUsers() {
         return userRepository.findAll()
                 .map(this::mapToUserResponse)
@@ -64,9 +58,6 @@ public class UserService {
                 .doOnError(e -> log.error("Error fetching all users: {}", e.getMessage(), e));
     }
 
-    /**
-     * Update arbitrary fields on a user (Admin only).
-     */
     public Mono<UserResponse> updateUser(Long id, UserUpdateRequest request) {
         return userRepository.findById(id)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found with ID: " + id)))
@@ -90,9 +81,7 @@ public class UserService {
                 .doOnError(ex -> log.error("Error updating user with ID {}: {}", id, ex.getMessage(), ex));
     }
 
-    /**
-     * Delete a user by ID (Admin only).
-     */
+
     public Mono<Void> deleteUser(Long id) {
         return userRepository.findById(id)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found with ID: " + id)))
@@ -101,27 +90,21 @@ public class UserService {
                 .doOnError(ex -> log.error("Error deleting user with ID {}: {}", id, ex.getMessage(), ex));
     }
 
-    /**
-     * Fetch a UserProfileDTO by user ID.
-     */
+
     public Mono<UserProfileDTO> getProfileById(Long id) {
         return userRepository.findById(id)
                 .map(this::toDto)
                 .doOnError(ex -> log.error("Error fetching user by id {}: {}", id, ex.getMessage(), ex));
     }
 
-    /**
-     * Fetch a UserProfileDTO by username.
-     */
+
     public Mono<UserProfileDTO> getProfileByUsername(String username) {
         return userRepository.findByUsername(username)
                 .map(this::toDto)
                 .doOnError(ex -> log.error("Error fetching user by username {}: {}", username, ex.getMessage(), ex));
     }
 
-    /**
-     * Update only email/avatar/phone on the user’s own profile.
-     */
+
     public Mono<UserProfileDTO> updateOwnProfile(String username,
                                                  String email,
                                                  String avatar,
@@ -145,18 +128,14 @@ public class UserService {
                 .doOnError(ex -> log.error("Error updating profile for {}: {}", username, ex.getMessage(), ex));
     }
 
-    /**
-     * Public profile lookup used by ProfileController.
-     */
+
     public Mono<UserProfileDTO> getUserProfile(String username) {
         return userRepository.findByUsername(username)
                 .map(this::mapToUserProfileDTO)
                 .doOnError(e -> log.error("Error fetching profile for {}: {}", username, e.getMessage(), e));
     }
 
-    /**
-     * Public profile update used by ProfileController.
-     */
+
     public Mono<UserProfileDTO> updateUserProfile(String username, ProfileUpdateRequest req) {
         return userRepository.findByUsername(username)
                 .flatMap(user -> {
@@ -175,9 +154,7 @@ public class UserService {
                 .doOnError(e -> log.error("Error updating profile for {}: {}", username, e.getMessage(), e));
     }
 
-    /**
-     * Update a user's avatar URL.
-     */
+
     public Mono<UserProfileDTO> updateAvatar(Long userId, String avatarUrl) {
         return userRepository.findById(userId)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found: " + userId)))

@@ -1,7 +1,7 @@
-// src/main/java/com/banenor/controller/AuthController.java
 package com.banenor.controller;
 
 import com.banenor.dto.*;
+import com.banenor.model.User;
 import com.banenor.security.JwtTokenUtil;
 import com.banenor.service.AuthService;
 import com.banenor.service.UserService;
@@ -10,11 +10,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
@@ -36,65 +35,57 @@ public class AuthController {
 
     @PostMapping("/register")
     public Mono<ResponseEntity<LoginResponse>> register(
-            @AuthenticationPrincipal org.springframework.security.core.userdetails.UserDetails userDetails,
-            @Valid @RequestBody RegistrationRequest registrationRequest) {
+            @AuthenticationPrincipal UserDetails currentUser,
+            @Valid @RequestBody RegistrationRequest req) {
 
-        if (userDetails == null || userDetails.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .noneMatch("ROLE_ADMIN"::equals)) {
+        if (currentUser == null ||
+                currentUser.getAuthorities().stream()
+                        .map(GrantedAuthority::getAuthority)
+                        .noneMatch("ROLE_ADMIN"::equals)) {
             return Mono.just(ResponseEntity.status(HttpStatus.FORBIDDEN).build());
         }
 
-        return authService.register(registrationRequest)
-                .flatMap(newUser -> {
-                    LoginRequest loginReq = new LoginRequest(
-                            newUser.getUsername(),
-                            registrationRequest.getPassword()
-                    );
-                    return authService.login(loginReq);
-                })
+        return authService.register(req)
+                .flatMap(u -> authService.login(
+                        new LoginRequest(u.getUsername(), req.getPassword())))
                 .map(token -> ResponseEntity.status(HttpStatus.CREATED).body(token));
     }
 
     @PostMapping("/login")
-    public Mono<ResponseEntity<LoginResponse>> login(@Valid @RequestBody LoginRequest loginRequest) {
+    public Mono<ResponseEntity<LoginResponse>> login(
+            @Valid @RequestBody LoginRequest loginRequest) {
         return authService.login(loginRequest)
                 .map(ResponseEntity::ok);
     }
 
     @PostMapping("/logout")
     public Mono<ResponseEntity<Void>> logout(
-            @RequestHeader(value = "Authorization", required = false) String authHeader) {
-
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            return authService.logout(token)
-                    .thenReturn(ResponseEntity.<Void>ok().build());
+            @RequestHeader(value = "Authorization", required = false) String h) {
+        if (h != null && h.startsWith("Bearer ")) {
+            return authService.logout(h.substring(7))
+                    .thenReturn(ResponseEntity.ok().<Void>build());
         }
-        return Mono.just(ResponseEntity.<Void>ok().build());
+        return Mono.just(ResponseEntity.ok().<Void>build());
     }
 
     @PostMapping("/reset-password")
     public Mono<ResponseEntity<String>> resetPassword(
             @Valid @RequestBody PasswordResetRequest request) {
-
         return authService.resetPassword(request)
                 .thenReturn(ResponseEntity.ok("Password reset successful"));
     }
 
     @PostMapping("/change-password")
     public Mono<ResponseEntity<String>> changePassword(
-            @AuthenticationPrincipal org.springframework.security.core.userdetails.UserDetails userDetails,
+            @AuthenticationPrincipal UserDetails currentUser,
             @Valid @RequestBody ChangePasswordRequest request) {
 
-        if (userDetails == null) {
-            return Mono.just(
-                    ResponseEntity.<String>status(HttpStatus.UNAUTHORIZED).body("Unauthorized")
-            );
+        if (currentUser == null) {
+            return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body("Unauthorized"));
         }
-
         return authService.changePassword(
-                        userDetails.getUsername(),
+                        currentUser.getUsername(),
                         request.getOldPassword(),
                         request.getNewPassword())
                 .thenReturn(ResponseEntity.ok("Password changed successfully"));
@@ -102,98 +93,88 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public Mono<ResponseEntity<LoginResponse>> refreshToken(
-            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+            @RequestHeader(value = "Authorization", required = false) String h) {
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        if (h == null || !h.startsWith("Bearer ")) {
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
 
-        String token = authHeader.substring(7);
-        String extractedUsername;
+        String raw = h.substring(7);
+        String username;
         try {
-            extractedUsername = jwtTokenUtil.getUsernameFromToken(token);
+            username = jwtTokenUtil.getUsernameFromToken(raw);
         } catch (ExpiredJwtException e) {
-            extractedUsername = e.getClaims().getSubject();
-        } catch (Exception e) {
+            username = e.getClaims().getSubject();
+        } catch (Exception ex) {
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
 
-        if (extractedUsername == null || extractedUsername.isBlank()) {
+        if (username == null || username.isBlank()) {
             return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
         }
+        String trimmed = username.trim();
 
-        // Only this trimmedUsername is captured in the lambda, and it's effectively final.
-        String trimmedUsername = extractedUsername.trim();
+        return userService.findEntityByUsername(trimmed)
+                .flatMap(user -> {
+                    List<String> roles = user.getRole()!=null
+                            ? List.of("ROLE_" + user.getRole().toUpperCase())
+                            : Collections.emptyList();
 
-        return userService.getUserByUsername(trimmedUsername)
-                .switchIfEmpty(Mono.error(new UsernameNotFoundException("User not found: " + trimmedUsername)))
-                .flatMap(userResp -> {
-                    List<String> roles = userResp.getRoles() == null
-                            ? Collections.emptyList()
-                            : userResp.getRoles();
-
-                    String newToken = jwtTokenUtil.generateToken(trimmedUsername, roles);
+                    String newToken = jwtTokenUtil.generateToken(trimmed, roles);
                     long expiresIn = (jwtTokenUtil
                             .getExpirationDateFromToken(newToken)
                             .getTime() - System.currentTimeMillis()) / 1000;
 
-                    LoginResponse response = new LoginResponse();
-                    response.setToken(newToken);
-                    response.setUsername(trimmedUsername);
-                    response.setExpiresIn(expiresIn);
-
-                    return Mono.just(ResponseEntity.ok(response));
+                    LoginResponse resp = new LoginResponse();
+                    resp.setToken(newToken);
+                    resp.setUsername(trimmed);
+                    resp.setExpiresIn(expiresIn);
+                    return Mono.just(ResponseEntity.ok(resp));
                 });
     }
 
     @GetMapping("/me")
     public Mono<ResponseEntity<UserResponse>> getCurrentUser(
-            @RequestHeader(value = "Authorization", required = false) String authHeader,
-            @AuthenticationPrincipal org.springframework.security.core.userdetails.UserDetails userDetails) {
+            @RequestHeader(value = "Authorization", required = false) String h,
+            @AuthenticationPrincipal UserDetails currentUser) {
 
-        // 1) Spring Security context already has us
-        if (userDetails != null) {
-            String principal = userDetails.getUsername();
+        if (currentUser != null) {
+            String p = currentUser.getUsername();
             try {
-                Long id = Long.valueOf(principal);
+                Long id = Long.valueOf(p);
                 return userService.getUserById(id)
-                        .map(resp -> ResponseEntity.ok(resp))
-                        .defaultIfEmpty(ResponseEntity.<UserResponse>notFound().build());
+                        .map(ResponseEntity::ok)
+                        .defaultIfEmpty(ResponseEntity.notFound().build());
             } catch (NumberFormatException ex) {
-                return userService.getUserByUsername(principal)
-                        .map(resp -> ResponseEntity.ok(resp))
-                        .defaultIfEmpty(ResponseEntity.<UserResponse>notFound().build());
+                return userService.getUserByUsername(p)
+                        .map(ResponseEntity::ok)
+                        .defaultIfEmpty(ResponseEntity.notFound().build());
             }
         }
 
-        // 2) Try parsing from JWT header
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            String extractedUsername;
+        if (h != null && h.startsWith("Bearer ")) {
+            String raw = h.substring(7), u;
             try {
-                extractedUsername = jwtTokenUtil.getUsernameFromToken(token);
+                u = jwtTokenUtil.getUsernameFromToken(raw);
             } catch (Exception e) {
-                return Mono.just(ResponseEntity.<UserResponse>status(HttpStatus.UNAUTHORIZED).build());
+                return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
             }
-
-            if (extractedUsername == null || extractedUsername.isBlank()) {
-                return Mono.just(ResponseEntity.<UserResponse>status(HttpStatus.UNAUTHORIZED).build());
+            if (u == null || u.isBlank()) {
+                return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
             }
-
-            String trimmedUsername = extractedUsername.trim();
+            String t = u.trim();
             try {
-                Long id = Long.valueOf(trimmedUsername);
+                Long id = Long.valueOf(t);
                 return userService.getUserById(id)
-                        .map(resp -> ResponseEntity.ok(resp))
-                        .defaultIfEmpty(ResponseEntity.<UserResponse>notFound().build());
+                        .map(ResponseEntity::ok)
+                        .defaultIfEmpty(ResponseEntity.notFound().build());
             } catch (NumberFormatException ex) {
-                return userService.getUserByUsername(trimmedUsername)
-                        .map(resp -> ResponseEntity.ok(resp))
-                        .defaultIfEmpty(ResponseEntity.<UserResponse>notFound().build());
+                return userService.getUserByUsername(t)
+                        .map(ResponseEntity::ok)
+                        .defaultIfEmpty(ResponseEntity.notFound().build());
             }
         }
 
-        // 3) No authentication info
-        return Mono.just(ResponseEntity.<UserResponse>status(HttpStatus.UNAUTHORIZED).build());
+        return Mono.just(ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
     }
 }

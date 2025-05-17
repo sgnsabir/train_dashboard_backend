@@ -14,6 +14,7 @@ import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.authentication.UserDetailsRepositoryReactiveAuthenticationManager;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
+import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -26,7 +27,6 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtGra
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.context.NoOpServerSecurityContextRepository;
-import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatcher;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import reactor.core.publisher.Mono;
 
@@ -34,11 +34,12 @@ import javax.crypto.SecretKey;
 
 @Slf4j
 @Configuration
+@EnableWebFluxSecurity                           // ← needed for WebFlux
 @EnableReactiveMethodSecurity
 public class SecurityConfig {
 
     @Value("${jwt.secret}")
-    private String jwtSecret;  // same Base64 value as in JwtTokenUtil
+    private String jwtSecret;
 
     @Value("${security.password.encoder.strength:10}")
     private int bcryptStrength;
@@ -58,49 +59,49 @@ public class SecurityConfig {
             "/sse/**"
     };
 
-    /** Public endpoints chain */
-    @Bean
-    @Order(1)
+    /**
+     * Public chain: OPTIONS + our auth POSTs + docs/actuator/WS/SSE GETs.
+     */
+    @Bean @Order(1)
     public SecurityWebFilterChain publicSecurityChain(ServerHttpSecurity http) {
-        ServerWebExchangeMatcher publicMatcher = ServerWebExchangeMatchers.matchers(
-                ServerWebExchangeMatchers.pathMatchers(HttpMethod.OPTIONS, "/**"),
-                ServerWebExchangeMatchers.pathMatchers(HttpMethod.POST, PUBLIC_POST),
-                ServerWebExchangeMatchers.pathMatchers(HttpMethod.GET, PUBLIC_GET)
-        );
-
         http
-                .securityMatcher(publicMatcher)
-                .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
+                .securityMatcher(ServerWebExchangeMatchers.matchers(
+                        ServerWebExchangeMatchers.pathMatchers(HttpMethod.OPTIONS, "/**"),
+                        ServerWebExchangeMatchers.pathMatchers(HttpMethod.POST, PUBLIC_POST),
+                        ServerWebExchangeMatchers.pathMatchers(HttpMethod.GET, PUBLIC_GET)
+                ))
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
-                .cors(cors -> { /* global CORS filter if configured */ })
+                .cors(cors -> { /* rely on global CorsWebFilter if you have one */ })
+                .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
                 .authorizeExchange(ex -> ex.anyExchange().permitAll());
 
         return http.build();
     }
 
-    /** Protected endpoints chain */
-    @Bean
-    @Order(2)
+    /**
+     * Protected chain: everything else requires a valid JWT.
+     */
+    @Bean @Order(2)
     public SecurityWebFilterChain protectedSecurityChain(ServerHttpSecurity http) {
-        Converter<Jwt, Mono<AbstractAuthenticationToken>> jwtConverter = buildJwtConverter();
+        Converter<Jwt, Mono<AbstractAuthenticationToken>> jwtConverter = jwtConverter();
 
         http
                 .securityMatcher(ServerWebExchangeMatchers.anyExchange())
-                .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
-                .cors(cors -> { /* global CORS filter if configured */ })
+                .cors(cors -> { /* rely on global CorsWebFilter */ })
+                .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint((exchange, err) -> {
-                            log.warn("Unauthorized: {}", err.getMessage());
+                        .authenticationEntryPoint((exchange, ex2) -> {
+                            log.warn("Unauthorized: {}", ex2.getMessage());
                             exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
                             return exchange.getResponse().setComplete();
                         })
-                        .accessDeniedHandler((exchange, err) -> {
-                            log.warn("Forbidden: {}", err.getMessage());
+                        .accessDeniedHandler((exchange, ex3) -> {
+                            log.warn("Forbidden: {}", ex3.getMessage());
                             exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
                             return exchange.getResponse().setComplete();
                         })
@@ -116,15 +117,15 @@ public class SecurityConfig {
         return http.build();
     }
 
-    private Converter<Jwt, Mono<AbstractAuthenticationToken>> buildJwtConverter() {
-        var authoritiesConverter = new JwtGrantedAuthoritiesConverter();
-        authoritiesConverter.setAuthorityPrefix("ROLE_");
-        authoritiesConverter.setAuthoritiesClaimName("roles");
+    private Converter<Jwt, Mono<AbstractAuthenticationToken>> jwtConverter() {
+        JwtGrantedAuthoritiesConverter authz = new JwtGrantedAuthoritiesConverter();
+        authz.setAuthorityPrefix("ROLE_");
+        authz.setAuthoritiesClaimName("roles");
 
-        var authConverter = new JwtAuthenticationConverter();
-        authConverter.setJwtGrantedAuthoritiesConverter(authoritiesConverter);
+        JwtAuthenticationConverter conv = new JwtAuthenticationConverter();
+        conv.setJwtGrantedAuthoritiesConverter(authz);
 
-        return new ReactiveJwtAuthenticationConverterAdapter(authConverter);
+        return new ReactiveJwtAuthenticationConverterAdapter(conv);
     }
 
     @Bean
@@ -139,10 +140,9 @@ public class SecurityConfig {
 
     @Bean
     public ReactiveJwtDecoder jwtDecoder() {
-        // decode the **same** Base64 secret
-        byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
-        SecretKey key = Keys.hmacShaKeyFor(keyBytes);
-        return NimbusReactiveJwtDecoder.withSecretKey(key).build();
+        byte[] key = Decoders.BASE64.decode(jwtSecret);
+        SecretKey sk = Keys.hmacShaKeyFor(key);
+        return NimbusReactiveJwtDecoder.withSecretKey(sk).build();
     }
 
     @Bean

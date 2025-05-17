@@ -3,6 +3,7 @@ package com.banenor.service;
 import java.util.Collections;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.ReactiveUserDetailsService;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -81,10 +82,12 @@ public class CustomUserDetailsService implements ReactiveUserDetailsService {
                 user.getUsername(),
                 user.getPassword(),
                 user.isEnabled(),
-                true,  // accountNonExpired
-                true,  // credentialsNonExpired
-                !user.isLocked(), // accountNonLocked
-                Collections.singletonList(() -> "ROLE_" + user.getRole().toUpperCase())
+                true,
+                true,
+                !user.isLocked(),
+                Collections.singletonList(
+                        new SimpleGrantedAuthority("ROLE_" + user.getRole().toUpperCase())
+                )
         );
     }
 
