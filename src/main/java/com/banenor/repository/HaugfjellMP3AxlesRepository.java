@@ -47,6 +47,7 @@ public interface HaugfjellMP3AxlesRepository extends R2dbcRepository<HaugfjellMP
             LocalDateTime end
     );
 
+    Flux<HaugfjellMP3Axles> findAllByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
     // ──────────────────────────────────────────────────────────────────────────
     // 2. DYNAMIC AGGREGATIONS (GROUP BY vit)

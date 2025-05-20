@@ -1,9 +1,7 @@
-// src/main/java/com/banenor/service/UserService.java
 package com.banenor.service;
 
 import com.banenor.controller.ProfileController.ProfileUpdateRequest;
-import com.banenor.dto.UserProfileDTO;
-import com.banenor.dto.UserResponse;
+import com.banenor.dto.UserDTO;
 import com.banenor.dto.UserUpdateRequest;
 import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
@@ -24,13 +22,13 @@ public class UserService {
 
     private final UserRepository userRepository;
 
-    public Mono<UserResponse> getUserByUsername(String username) {
+    public Mono<UserDTO> getUserByUsername(String username) {
         return userRepository.findByUsername(username)
                 .map(this::mapToUserResponse)
                 .doOnError(e -> log.error("Error fetching user by username {}: {}", username, e.getMessage(), e));
     }
 
-    public Mono<UserResponse> getUserById(Long id) {
+    public Mono<UserDTO> getUserById(Long id) {
         return userRepository.findById(id)
                 .map(this::mapToUserResponse)
                 .doOnError(e -> log.error("Error fetching user by id {}: {}", id, e.getMessage(), e));
@@ -51,14 +49,14 @@ public class UserService {
     }
 
 
-    public Flux<UserResponse> getAllUsers() {
+    public Flux<UserDTO> getAllUsers() {
         return userRepository.findAll()
                 .map(this::mapToUserResponse)
                 .doOnComplete(() -> log.info("Fetched all users"))
                 .doOnError(e -> log.error("Error fetching all users: {}", e.getMessage(), e));
     }
 
-    public Mono<UserResponse> updateUser(Long id, UserUpdateRequest request) {
+    public Mono<UserDTO> updateUser(Long id, UserUpdateRequest request) {
         return userRepository.findById(id)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found with ID: " + id)))
                 .flatMap(user -> {
@@ -91,24 +89,24 @@ public class UserService {
     }
 
 
-    public Mono<UserProfileDTO> getProfileById(Long id) {
+    public Mono<UserDTO> getProfileById(Long id) {
         return userRepository.findById(id)
                 .map(this::toDto)
                 .doOnError(ex -> log.error("Error fetching user by id {}: {}", id, ex.getMessage(), ex));
     }
 
 
-    public Mono<UserProfileDTO> getProfileByUsername(String username) {
+    public Mono<UserDTO> getProfileByUsername(String username) {
         return userRepository.findByUsername(username)
                 .map(this::toDto)
                 .doOnError(ex -> log.error("Error fetching user by username {}: {}", username, ex.getMessage(), ex));
     }
 
 
-    public Mono<UserProfileDTO> updateOwnProfile(String username,
-                                                 String email,
-                                                 String avatar,
-                                                 String phone) {
+    public Mono<UserDTO> updateOwnProfile(String username,
+                                          String email,
+                                          String avatar,
+                                          String phone) {
         return userRepository.findByUsername(username)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found: " + username)))
                 .flatMap(user -> {
@@ -129,14 +127,14 @@ public class UserService {
     }
 
 
-    public Mono<UserProfileDTO> getUserProfile(String username) {
+    public Mono<UserDTO> getUserProfile(String username) {
         return userRepository.findByUsername(username)
                 .map(this::mapToUserProfileDTO)
                 .doOnError(e -> log.error("Error fetching profile for {}: {}", username, e.getMessage(), e));
     }
 
 
-    public Mono<UserProfileDTO> updateUserProfile(String username, ProfileUpdateRequest req) {
+    public Mono<UserDTO> updateUserProfile(String username, ProfileUpdateRequest req) {
         return userRepository.findByUsername(username)
                 .flatMap(user -> {
                     if (req.getEmail() != null && !req.getEmail().trim().isEmpty()) {
@@ -155,7 +153,7 @@ public class UserService {
     }
 
 
-    public Mono<UserProfileDTO> updateAvatar(Long userId, String avatarUrl) {
+    public Mono<UserDTO> updateAvatar(Long userId, String avatarUrl) {
         return userRepository.findById(userId)
                 .switchIfEmpty(Mono.error(new IllegalArgumentException("User not found: " + userId)))
                 .flatMap(user -> {
@@ -171,13 +169,13 @@ public class UserService {
     // Private mapping helpers
     // ──────────────────────────────────────────────────────────────────────────
 
-    private UserProfileDTO toDto(User user) {
-        return UserProfileDTO.builder()
-                .userId(user.getUserId())
+    private UserDTO toDto(User user) {
+        return UserDTO.builder()
+                .id(user.getUserId())
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .avatarUrl(user.getAvatar())
-                .phoneNumber(user.getPhone())
+                .phone(user.getPhone())
                 .roles(user.getRole() != null
                         ? Collections.singletonList(user.getRole())
                         : Collections.emptyList())
@@ -186,29 +184,29 @@ public class UserService {
                 .build();
     }
 
-    private UserProfileDTO mapToUserProfileDTO(User user) {
+    private UserDTO mapToUserProfileDTO(User user) {
         List<String> roles = user.getRole() != null
                 ? Collections.singletonList(user.getRole())
                 : Collections.emptyList();
 
-        return UserProfileDTO.builder()
-                .userId(user.getUserId())
+        return UserDTO.builder()
+                .id(user.getUserId())
                 .username(user.getUsername())
                 .email(user.getEmail())
                 .avatarUrl(user.getAvatar())
-                .phoneNumber(user.getPhone())
+                .phone(user.getPhone())
                 .roles(roles)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();
     }
 
-    private UserResponse mapToUserResponse(User user) {
-        UserResponse resp = new UserResponse();
+    private UserDTO mapToUserResponse(User user) {
+        UserDTO resp = new UserDTO();
         resp.setId(user.getUserId());
         resp.setUsername(user.getUsername());
         resp.setEmail(user.getEmail());
-        resp.setAvatar(user.getAvatar());
+        resp.setAvatarUrl(user.getAvatar());
         resp.setPhone(user.getPhone());
         resp.setTwoFactorEnabled(user.getTwoFactorEnabled());
         resp.setCreatedAt(user.getCreatedAt());

@@ -5,12 +5,23 @@ import java.time.LocalDateTime;
 
 /**
  * DTO for raw sensor data responses.
- * Fields correspond exactly to the available Tp columns in AbstractAxles.
+ * Fields correspond exactly to the available Tp columns in AbstractAxles,
+ * plus header/meta fields that the UI needs.
  */
 @Data
 public class RawDataResponse {
+    // --- Header / Meta fields ---
+    private Integer axleId;
+    private String ait;
+    private String vty;
+    private String vit;
+    private String aiv;
+    private String fe;
+    private String idRf2R;
+
     private Integer analysisId;
     private LocalDateTime createdAt;
+    private Integer segmentId;
 
     // --- Speed Measurements ---
     private Double spdTp1;

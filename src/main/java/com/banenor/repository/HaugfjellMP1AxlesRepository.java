@@ -56,7 +56,7 @@ public interface HaugfjellMP1AxlesRepository extends R2dbcRepository<HaugfjellMP
             LocalDateTime end
     );
 
-
+    Flux<HaugfjellMP1Axles> findAllByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
     // ──────────────────────────────────────────────────────────────────────────
     // 2. DYNAMIC AGGREGATIONS (GROUP BY vit)
     //    → For detailed charts of metric vs. VIT

@@ -1,64 +1,51 @@
 package com.banenor.service;
 
-import org.springframework.cache.CacheManager;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.RedisConnectionFailureException;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
+import org.springframework.data.redis.core.ReactiveValueOperations;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import java.time.Duration;
 
 @Service
+@Slf4j
 public class CacheServiceImpl implements CacheService {
 
-    private static final Logger logger = LoggerFactory.getLogger(CacheServiceImpl.class);
-    private final CacheManager cacheManager;
+    private static final Duration DEFAULT_TTL = Duration.ofMinutes(5);
+    private final ReactiveValueOperations<String, Object> valueOps;
 
-    public CacheServiceImpl(CacheManager cacheManager) {
-        this.cacheManager = cacheManager;
+    public CacheServiceImpl(ReactiveRedisTemplate<String, Object> redisTemplate) {
+        this.valueOps = redisTemplate.opsForValue();
     }
 
     @Override
     public Mono<Void> cacheAverage(String key, Double value) {
-        return Mono.fromRunnable(() -> {
-                    var cache = cacheManager.getCache("averages");
-                    if (cache != null) {
-                        cache.put(key, value);
+        String redisKey = "averages:" + key;
+        return valueOps
+                .set(redisKey, value, DEFAULT_TTL)
+                .doOnSuccess(ok -> {
+                    if (Boolean.TRUE.equals(ok)) {
+                        log.debug("Cached average {} = {} (TTL {}s)", redisKey, value, DEFAULT_TTL.getSeconds());
                     } else {
-                        logger.error("Cache 'averages' is not available");
-                        throw new IllegalStateException("Cache 'averages' is not available");
+                        log.warn("Failed to cache average for key {}", redisKey);
                     }
                 })
-                .subscribeOn(Schedulers.boundedElastic())
-                .onErrorResume(ex -> {
-                    if (ex instanceof RedisConnectionFailureException || ex instanceof DataAccessException) {
-                        logger.error("Error caching key: {}", key, ex);
-                        return Mono.<Void>empty();
-                    }
-                    return Mono.error(ex);
-                }).then();
+                .doOnError(ex -> log.error("Error caching average for key {}", redisKey, ex))
+                .then();
     }
 
     @Override
     public Mono<Double> getCachedAverage(String key) {
-        return Mono.fromCallable(() -> {
-                    var cache = cacheManager.getCache("averages");
-                    if (cache != null) {
-                        return cache.get(key, Double.class);
-                    } else {
-                        logger.error("Cache 'averages' is not available");
-                        return null;
-                    }
-                })
+        String redisKey = "averages:" + key;
+        return valueOps
+                .get(redisKey)
                 .cast(Double.class)
-                .subscribeOn(Schedulers.boundedElastic())
+                .doOnNext(val -> log.debug("Fetched cached average {} = {}", redisKey, val))
                 .onErrorResume(ex -> {
-                    if (ex instanceof RedisConnectionFailureException || ex instanceof DataAccessException) {
-                        logger.error("Error retrieving key: {}", key, ex);
-                        return Mono.empty();
-                    }
-                    return Mono.error(ex);
-                });
+                    log.error("Error retrieving cached average for key {}", redisKey, ex);
+                    return Mono.just(0.0);
+                })
+                .defaultIfEmpty(0.0);
     }
 }

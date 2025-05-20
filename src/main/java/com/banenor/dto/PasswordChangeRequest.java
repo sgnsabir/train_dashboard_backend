@@ -16,7 +16,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ChangePasswordRequest {
+public class PasswordChangeRequest {
 
     @NotBlank(message = "Old password must not be blank")
     private String oldPassword;
@@ -27,11 +27,8 @@ public class ChangePasswordRequest {
     @NotBlank(message = "Confirm password must not be blank")
     private String confirmNewPassword;
 
-    @AssertTrue(message = "New password and confirm password must match")
+    @AssertTrue(message = "New password and confirmation must match")
     public boolean isNewPasswordMatching() {
-        if (newPassword == null || confirmNewPassword == null) {
-            return false;
-        }
-        return newPassword.equals(confirmNewPassword);
+        return newPassword != null && newPassword.equals(confirmNewPassword);
     }
 }

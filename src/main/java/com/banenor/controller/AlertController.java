@@ -1,8 +1,9 @@
+// src/main/java/com/banenor/controller/AlertController.java
 package com.banenor.controller;
 
 import com.banenor.dto.AlertAcknowledgeRequest;
 import com.banenor.dto.AlertDTO;
-import com.banenor.dto.AlertResponse;
+import com.banenor.dto.AlertStatsDTO;
 import com.banenor.service.AlertService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -10,13 +11,15 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
+
+import java.time.LocalDateTime;
 
 @Slf4j
 @RestController
@@ -27,30 +30,77 @@ public class AlertController {
 
     private final AlertService alertService;
 
-    @Operation(summary = "Get Alert History", description = "Retrieve a list of past alerts")
-    @ApiResponses(value = {
+    @Operation(
+            summary = "Get Alert History",
+            description = "Retrieve a list of past alerts, optionally filtered by trainNo and/or time range"
+    )
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Alert history retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     @GetMapping("/history")
     @PreAuthorize("hasAnyRole('USER','ADMIN')")
-    public Flux<AlertDTO> getAlertHistory() {
-        log.info("Fetching alert history");
-        return alertService.getAlertHistory()
+    public Flux<AlertDTO> getAlertHistory(
+            @RequestParam(required = false) Integer trainNo,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
+    ) {
+        log.info("Fetching alert history: trainNo={}, from={}, to={}", trainNo, from, to);
+        return alertService.getAlertHistory(trainNo, from, to)
                 .map(this::toDto)
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(dto -> log.debug("Fetched alert DTO: {}", dto))
-                .doOnComplete(() -> log.info("Completed fetching alert history"))
-                .doOnError(ex -> log.error("Error retrieving alert history: {}", ex.getMessage(), ex))
+                .doOnError(ex -> log.error("Error retrieving alert history", ex))
                 .onErrorResume(ex -> {
-                    // fallback to empty list on error
                     log.warn("Resuming with empty history due to error");
                     return Flux.empty();
                 });
     }
 
-    @Operation(summary = "Acknowledge Alert", description = "Mark a specific alert as acknowledged")
-    @ApiResponses(value = {
+    @Operation(
+            summary = "Get Alert Statistics",
+            description = "Retrieve counts of alerts by severity over a time range"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Alert stats retrieved successfully"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @GetMapping("/stats")
+    @PreAuthorize("hasAnyRole('USER','ADMIN')")
+    public Mono<AlertStatsDTO> getAlertStats(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
+    ) {
+        log.info("Fetching alert stats: from={}, to={}", from, to);
+        return alertService.getAlertHistory(null, from, to)
+                .collectList()
+                .map(list -> {
+                    long info     = list.stream()
+                            .filter(a -> a.getSeverity() == AlertDTO.Severity.INFO)
+                            .count();
+                    long warn     = list.stream()
+                            .filter(a -> a.getSeverity() == AlertDTO.Severity.WARN)
+                            .count();
+                    long critical = list.stream()
+                            .filter(a -> a.getSeverity() == AlertDTO.Severity.CRITICAL)
+                            .count();
+                    long total    = list.size();
+                    return new AlertStatsDTO(info, warn, critical, total, from, to);
+                })
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnSuccess(stats -> log.debug("Computed alert stats: {}", stats))
+                .doOnError(ex -> log.error("Error retrieving alert stats", ex));
+    }
+
+    @Operation(
+            summary = "Acknowledge Alert",
+            description = "Mark a specific alert as acknowledged"
+    )
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Alert acknowledged successfully"),
             @ApiResponse(responseCode = "400", description = "Invalid request payload or ID mismatch"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
@@ -62,8 +112,8 @@ public class AlertController {
             @RequestBody AlertAcknowledgeRequest request
     ) {
         if (request == null || request.getAlertId() == null || !id.equals(request.getAlertId())) {
-            log.warn("Path id {} and payload id {} mismatch or missing", id,
-                    request == null ? null : request.getAlertId());
+            log.warn("Path id {} and payload id {} mismatch or missing",
+                    id, request == null ? null : request.getAlertId());
             return Mono.just(ResponseEntity.badRequest().build());
         }
 
@@ -74,16 +124,11 @@ public class AlertController {
                     return ResponseEntity.ok().<Void>build();
                 }))
                 .subscribeOn(Schedulers.boundedElastic())
-                .doOnError(ex -> log.error("Error acknowledging alert id {}: {}", id, ex.getMessage(), ex))
-                .onErrorResume(ex ->
-                        Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build())
-                );
+                .doOnError(ex -> log.error("Error acknowledging alert id " + id, ex))
+                .onErrorResume(ex -> Mono.just(ResponseEntity.status(500).build()));
     }
 
-    /**
-     * Helper to convert internal AlertResponse into the richer AlertDTO for clients.
-     */
-    private AlertDTO toDto(AlertResponse r) {
+    private AlertDTO toDto(com.banenor.dto.AlertResponse r) {
         return AlertDTO.builder()
                 .id(r.getId())
                 .subject(r.getSubject())

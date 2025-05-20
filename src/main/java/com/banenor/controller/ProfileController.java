@@ -1,7 +1,7 @@
 // src/main/java/com/banenor/controller/ProfileController.java
 package com.banenor.controller;
 
-import com.banenor.dto.UserProfileDTO;
+import com.banenor.dto.UserDTO;
 import com.banenor.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -36,7 +36,7 @@ public class ProfileController {
             description = "Retrieve the profile details of the currently authenticated user"
     )
     @GetMapping
-    public Mono<ResponseEntity<UserProfileDTO>> getProfile(
+    public Mono<ResponseEntity<UserDTO>> getProfile(
             @AuthenticationPrincipal UserDetails userDetails) {
 
         if (userDetails == null) {
@@ -54,7 +54,7 @@ public class ProfileController {
             description = "Update profile details such as avatar, email, and phone for the currently authenticated user"
     )
     @PutMapping
-    public Mono<ResponseEntity<UserProfileDTO>> updateProfile(
+    public Mono<ResponseEntity<UserDTO>> updateProfile(
             @AuthenticationPrincipal UserDetails userDetails,
             @Valid @RequestBody ProfileUpdateRequest request) {
 

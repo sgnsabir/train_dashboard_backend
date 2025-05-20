@@ -37,7 +37,7 @@ public class SettingsController {
 
         return userService.getUserProfile(principal.getUsername())
                 .flatMap(profile ->
-                        settingsService.getUserSettings(profile.getUserId())
+                        settingsService.getUserSettings(profile.getId())
                                 .map(dashboard -> mapToUserSettingsDTO(profile, dashboard))
                 )
                 .map(settings -> ResponseEntity.ok(settings))
@@ -61,12 +61,12 @@ public class SettingsController {
 
         return userService.getUserProfile(principal.getUsername())
                 .flatMap(profile -> {
-                    Long userId = profile.getUserId();
+                    Long userId = profile.getId();
 
                     Mono<DashboardSettingsDTO> updatedDashboard =
                             settingsService.updateUserSettings(userId, incoming.getDashboard());
 
-                    Mono<UserProfileDTO> updatedProfile =
+                    Mono<UserDTO> updatedProfile =
                             userService.updateOwnProfile(
                                     principal.getUsername(),
                                     incoming.getGeneral().getEmail(),
@@ -89,7 +89,7 @@ public class SettingsController {
     // Private helper to assemble the wrapper DTO from profile + dashboard pieces
     //───────────────────────────────────────────────────────────────────────────────────
 
-    private UserSettingsDTO mapToUserSettingsDTO(UserProfileDTO profile,
+    private UserSettingsDTO mapToUserSettingsDTO(UserDTO profile,
                                                  DashboardSettingsDTO dashboard) {
         return UserSettingsDTO.builder()
                 .general(

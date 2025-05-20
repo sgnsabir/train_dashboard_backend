@@ -32,35 +32,32 @@ public class AlertServiceImpl implements AlertService {
 
     @Override
     public Mono<Void> checkSensorThresholds() {
-        // stubbed sensor‐threshold logic...
-        Double averageSpeed = 85.0;
-        Double speedThreshold = 80.0;
-        if (averageSpeed > speedThreshold) {
-            String subject = "High Average Speed Alert";
-            String text = "Average speed " + averageSpeed + " km/h exceeds threshold!";
-            return sendEmailAndPersist(subject, text);
+        // ... your existing stub logic ...
+        Double avg = 85.0, thresh = 80.0;
+        if (avg > thresh) {
+            String subj = "High Average Speed Alert";
+            String txt = "Average speed " + avg + " km/h exceeds threshold!";
+            return sendEmailAndPersist(subj, txt);
         }
         return Mono.empty();
     }
 
     private Mono<Void> sendEmailAndPersist(String subject, String text) {
         return Mono.fromRunnable(() -> {
-                    // send email
-                    SimpleMailMessage message = new SimpleMailMessage();
-                    message.setTo("alert@example.com");
-                    message.setSubject(subject);
-                    message.setText(text);
-                    mailSender.send(message);
+                    SimpleMailMessage m = new SimpleMailMessage();
+                    m.setTo("alert@example.com");
+                    m.setSubject(subject);
+                    m.setText(text);
+                    mailSender.send(m);
                 })
                 .then(Mono.defer(() -> {
-                    // persist
-                    AlertHistory entity = AlertHistory.builder()
+                    AlertHistory e = AlertHistory.builder()
                             .subject(subject)
                             .text(text)
                             .timestamp(LocalDateTime.now())
                             .acknowledged(false)
                             .build();
-                    return alertRepo.save(entity);
+                    return alertRepo.save(e);
                 }))
                 .doOnNext(saved -> log.debug("Persisted alert {}", saved.getId()))
                 .then();
@@ -68,9 +65,9 @@ public class AlertServiceImpl implements AlertService {
 
     @Override
     public Flux<AlertResponse> getAlertHistory() {
+        // original, unfiltered history
         return alertRepo.findAllByOrderByTimestampDesc()
                 .map(mapper::toDto)
-                // convert AlertHistoryDTO → AlertResponse
                 .map(dto -> {
                     AlertResponse r = new AlertResponse();
                     r.setId(dto.getId());
@@ -78,8 +75,25 @@ public class AlertServiceImpl implements AlertService {
                     r.setMessage(dto.getText());
                     r.setTimestamp(dto.getTimestamp());
                     r.setAcknowledged(dto.getAcknowledged());
+                    r.setAcknowledgedBy(dto.getAcknowledgedBy());
+                    r.setTrainNo(dto.getTrainNo());
+                    r.setSeverity(dto.getSeverity());
                     return r;
                 });
+    }
+
+    @Override
+    public Flux<AlertResponse> getAlertHistory(
+            Integer trainNo,
+            LocalDateTime from,
+            LocalDateTime to
+    ) {
+        // filtered history — reuses the no-arg method
+        return getAlertHistory()
+                .filter(r -> from == null || !r.getTimestamp().isBefore(from))
+                .filter(r -> to   == null || !r.getTimestamp().isAfter(to));
+        // TODO: once you persist trainNo in AlertHistory, add:
+        // .filter(r -> trainNo == null || trainNo.equals(r.getTrainNo()))
     }
 
     @Override
@@ -89,6 +103,7 @@ public class AlertServiceImpl implements AlertService {
                     alert.setAcknowledged(true);
                     return alertRepo.save(alert);
                 })
-                .then();
+                .then()
+                .doOnSuccess(v -> log.info("Alert {} acknowledged", request.getAlertId()));
     }
 }

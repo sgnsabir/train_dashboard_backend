@@ -37,7 +37,7 @@ public class JwtTokenUtil {
     /**
      * Token TTL in seconds.
      */
-    @Value("${jwt.expiration-in-seconds:3600}")
+    @Value("${jwt.expiration-in-seconds:36000}")
     private Long jwtExpirationSeconds;
 
     /**
@@ -77,14 +77,18 @@ public class JwtTokenUtil {
         Date now = new Date();
         Date expires = new Date(now.getTime() + jwtExpirationSeconds * 1000);
 
-        boolean isAdmin = roles.stream().anyMatch(r -> r.equalsIgnoreCase("ROLE_ADMIN"));
+        // Strip leading "ROLE_" so converter will prefix back
+        List<String> simpleRoles = roles.stream()
+                .map(r -> r.startsWith("ROLE_") ? r.substring(5) : r)
+                .collect(Collectors.toList());
 
         return Jwts.builder()
                 .setHeaderParam(Header.TYPE, Header.JWT_TYPE)
                 .setSubject(username)
                 .setIssuedAt(now)
                 .setExpiration(expires)
-                .claim("isAdmin", isAdmin)
+                .claim("roles", simpleRoles)             // e.g. ["ADMIN"] roles or simpleRoles
+                .claim("isAdmin", roles.contains("ROLE_ADMIN"))
                 .signWith(signingKey, SignatureAlgorithm.HS256)
                 .compact();
     }

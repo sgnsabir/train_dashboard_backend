@@ -38,7 +38,7 @@ import javax.crypto.SecretKey;
 @EnableReactiveMethodSecurity
 public class SecurityConfig {
 
-    @Value("${jwt.secret}")
+    @Value("${jwt.secret:AZmsBHO2Oz2ZFXctJprovHnw2qHaWpyLmunQjz35U6w=}")
     private String jwtSecret;
 
     @Value("${security.password.encoder.strength:10}")

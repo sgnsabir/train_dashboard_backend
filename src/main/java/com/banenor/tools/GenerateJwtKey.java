@@ -6,10 +6,15 @@ import io.jsonwebtoken.io.Encoders;
 import io.jsonwebtoken.security.Keys;
 
 import javax.crypto.SecretKey;
+import java.util.Date;
 
 public class GenerateJwtKey {
 
     public static void main(String[] args) {
+        Date now = new Date();
+        Date expires = new Date(now.getTime() + 36000 * 1000);
+        System.out.println("Now: " + now);
+        System.out.println("Expire: " + expires);
         // Generate a secure random key for HS256
         SecretKey key = Keys.secretKeyFor(SignatureAlgorithm.HS256);
 

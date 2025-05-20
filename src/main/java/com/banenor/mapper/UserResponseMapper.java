@@ -1,7 +1,7 @@
 package com.banenor.mapper;
 
 import com.banenor.model.User;
-import com.banenor.dto.UserResponse;
+import com.banenor.dto.UserDTO;
 import org.mapstruct.Mapper;
 import org.mapstruct.factory.Mappers;
 import java.util.Collections;
@@ -17,11 +17,11 @@ public interface UserResponseMapper {
      * @param user the User entity to map
      * @return the corresponding UserResponse DTO, or null if user is null
      */
-    default UserResponse mapToUserResponse(User user) {
+    default UserDTO mapToUserResponse(User user) {
         if (user == null) {
             return null;
         }
-        UserResponse response = new UserResponse();
+        UserDTO response = new UserDTO();
         response.setId(user.getUserId());
         response.setUsername(user.getUsername());
         response.setEmail(user.getEmail());
@@ -29,7 +29,7 @@ public interface UserResponseMapper {
         response.setRoles(Collections.singletonList(user.getRole()));
         response.setCreatedAt(user.getCreatedAt());
         response.setUpdatedAt(user.getUpdatedAt());
-        response.setAvatar(user.getAvatar());
+        response.setAvatarUrl(user.getAvatar());
         response.setTwoFactorEnabled(user.getTwoFactorEnabled());
         response.setPhone(user.getPhone());
         return response;
