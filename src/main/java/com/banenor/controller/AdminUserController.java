@@ -24,11 +24,11 @@ import reactor.core.publisher.Mono;
 @RequestMapping("/api/v1/users")
 @Tag(name = "User Management", description = "Endpoints for user management")
 @Validated
-public class UserController {
+public class AdminUserController {
 
     private final UserService userService;
 
-    public UserController(UserService userService) {
+    public AdminUserController(UserService userService) {
         this.userService = userService;
     }
 

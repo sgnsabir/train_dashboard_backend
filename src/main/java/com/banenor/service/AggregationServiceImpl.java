@@ -19,6 +19,28 @@ public class AggregationServiceImpl implements AggregationService {
     private final RepositoryResolver repositoryResolver;
     private final HaugfjellMP1AxlesRepository mp1Repo;
     private final HaugfjellMP3AxlesRepository mp3Repo;
+    private final CacheService cacheService;
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // COMBINED VIBRATION METRIC (for AdminDashboard "avgVibration")
+    //───────────────────────────────────────────────────────────────────────────────
+
+    @Override
+    public Mono<Double> getAverageVibration(Integer trainNo) {
+        return Mono.zip(
+                        getAverageVibrationLeft(trainNo),
+                        getAverageVibrationRight(trainNo),
+                        (left, right) -> (left + right) / 2.0
+                )
+                .doOnNext(avg -> {
+                    log.debug("Computed combined average vibration for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgVibration", avg).subscribe();
+                })
+                .onErrorResume(e -> {
+                    log.warn("Error computing combined average vibration for train {}: {}", trainNo, e.getMessage());
+                    return Mono.just(0.0);
+                });
+    }
 
     //───────────────────────────────────────────────────────────────────────────────
     // SPEED METRICS
@@ -31,7 +53,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgSpeedByTrainNo(trainNo),
                 repo -> repo.findOverallAvgSpeedByTrainNo(trainNo),
                 "average speed"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgSpeed for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgSpeed", avg).subscribe();
+                });
     }
 
     @Override
@@ -88,7 +114,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgAoaByTrainNo(trainNo),
                 repo -> repo.findOverallAvgAoaByTrainNo(trainNo),
                 "average AOA"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgAoa for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgAoa", avg).subscribe();
+                });
     }
 
     @Override
@@ -145,7 +175,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgVibrationLeftByTrainNo(trainNo),
                 repo -> repo.findOverallAvgVibrationLeftByTrainNo(trainNo),
                 "average vibration left"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgVibrationLeft for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgVibrationLeft", avg).subscribe();
+                });
     }
 
     @Override
@@ -202,7 +236,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgVibrationRightByTrainNo(trainNo),
                 repo -> repo.findOverallAvgVibrationRightByTrainNo(trainNo),
                 "average vibration right"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgVibrationRight for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgVibrationRight", avg).subscribe();
+                });
     }
 
     @Override
@@ -259,7 +297,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgVerticalForceLeftByTrainNo(trainNo),
                 repo -> repo.findOverallAvgVerticalForceLeftByTrainNo(trainNo),
                 "average vertical force left"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgVerticalForceLeft for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgVerticalForceLeft", avg).subscribe();
+                });
     }
 
     @Override
@@ -316,7 +358,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgVerticalForceRightByTrainNo(trainNo),
                 repo -> repo.findOverallAvgVerticalForceRightByTrainNo(trainNo),
                 "average vertical force right"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgVerticalForceRight for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgVerticalForceRight", avg).subscribe();
+                });
     }
 
     @Override
@@ -373,7 +419,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgLateralForceLeftByTrainNo(trainNo),
                 repo -> repo.findOverallAvgLateralForceLeftByTrainNo(trainNo),
                 "average lateral force left"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgLateralForceLeft for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgLateralForceLeft", avg).subscribe();
+                });
     }
 
     @Override
@@ -430,7 +480,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgLateralForceRightByTrainNo(trainNo),
                 repo -> repo.findOverallAvgLateralForceRightByTrainNo(trainNo),
                 "average lateral force right"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgLateralForceRight for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgLateralForceRight", avg).subscribe();
+                });
     }
 
     @Override
@@ -487,7 +541,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgLateralVibrationLeftByTrainNo(trainNo),
                 repo -> repo.findOverallAvgLateralVibrationLeftByTrainNo(trainNo),
                 "average lateral vibration left"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgLateralVibrationLeft for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgLateralVibrationLeft", avg).subscribe();
+                });
     }
 
     @Override
@@ -544,7 +602,11 @@ public class AggregationServiceImpl implements AggregationService {
                 repo -> repo.findOverallAvgLateralVibrationRightByTrainNo(trainNo),
                 repo -> repo.findOverallAvgLateralVibrationRightByTrainNo(trainNo),
                 "average lateral vibration right"
-        );
+        )
+                .doOnNext(avg -> {
+                    log.debug("Caching avgLateralVibrationRight for train {} = {}", trainNo, avg);
+                    cacheService.cacheAverage("avgLateralVibrationRight", avg).subscribe();
+                });
     }
 
     @Override

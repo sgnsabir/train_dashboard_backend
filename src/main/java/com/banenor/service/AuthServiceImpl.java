@@ -8,8 +8,12 @@ import com.banenor.exception.UserNotFoundException;
 import com.banenor.model.User;
 import com.banenor.repository.UserRepository;
 import com.banenor.security.JwtTokenUtil;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.redis.core.ReactiveRedisTemplate;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.ReactiveAuthenticationManager;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.ReactiveSecurityContextHolder;
@@ -19,13 +23,15 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
     private final ReactiveAuthenticationManager authenticationManager;
@@ -33,36 +39,41 @@ public class AuthServiceImpl implements AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenUtil jwtTokenUtil;
-
-    public AuthServiceImpl(ReactiveAuthenticationManager authenticationManager,
-                           ReactiveUserDetailsService userDetailsService,
-                           UserRepository userRepository,
-                           PasswordEncoder passwordEncoder,
-                           JwtTokenUtil jwtTokenUtil) {
-        this.authenticationManager = authenticationManager;
-        this.userDetailsService = userDetailsService;
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.jwtTokenUtil = jwtTokenUtil;
-    }
+    private final EmailService emailService;
+    private final ReactiveRedisTemplate<String, Object> redisTemplate;
 
     @Override
     @Audit(action = "User Registration", resource = "User")
     public Mono<User> register(RegistrationRequest req) {
-        return userRepository.findByUsername(req.getUsername())
+        String username = req.getUsername().trim();
+        String email    = req.getEmail().trim();
+        String rawPwd   = req.getPassword().trim();
+
+        return userRepository.findByUsername(username)
                 .flatMap(u -> Mono.<User>error(new UserAlreadyExistsException("Username is already taken")))
                 .switchIfEmpty(
-                        userRepository.findByEmail(req.getEmail())
+                        userRepository.findByEmail(email)
                                 .flatMap(u -> Mono.<User>error(new UserAlreadyExistsException("Email is already registered")))
                                 .switchIfEmpty(Mono.defer(() -> {
                                     User user = User.builder()
-                                            .username(req.getUsername())
-                                            .email(req.getEmail())
-                                            .password(passwordEncoder.encode(req.getPassword()))
+                                            .username(username)
+                                            .email(email)
+                                            .password(passwordEncoder.encode(rawPwd))
                                             .role("USER")
+                                            .enabled(false)
                                             .build();
-                                    log.info("Registering new user: {}", req.getUsername());
-                                    return userRepository.save(user);
+
+                                    log.info("Registering new user (disabled until verification): {}", username);
+
+                                    return userRepository.save(user)
+                                            .flatMap(saved -> {
+                                                String token = jwtTokenUtil.generateToken(saved.getUsername(), Collections.emptyList());
+                                                String link  = emailService.buildVerificationLink(token);
+                                                return emailService.sendVerificationEmail(saved.getEmail(), link)
+                                                        .thenReturn(saved);
+                                            })
+                                            .onErrorMap(DataIntegrityViolationException.class,
+                                                    ex -> new UserAlreadyExistsException("Username or email already exists", ex));
                                 }))
                 );
     }
@@ -70,60 +81,66 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Audit(action = "User Login", resource = "Authentication")
     public Mono<AuthResponse> login(LoginRequest req) {
-        if (req.getUsername() == null || req.getUsername().trim().isEmpty()
-                || req.getPassword() == null || req.getPassword().trim().isEmpty()) {
+        String username = req.getUsername() == null ? "" : req.getUsername().trim();
+        String password = req.getPassword() == null ? "" : req.getPassword().trim();
+
+        if (username.isEmpty() || password.isEmpty()) {
             return Mono.error(new InvalidCredentialsException("Username and password are required"));
         }
-        String username = req.getUsername().trim();
-        String password = req.getPassword().trim();
 
-        return authenticationManager.authenticate(
-                        new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(username, password)
-                )
+        return authenticationManager
+                .authenticate(new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(username, password))
+                .onErrorMap(DisabledException.class,
+                        ex -> new InvalidCredentialsException("Account not yet verified", ex))
                 .onErrorMap(BadCredentialsException.class,
                         ex -> new InvalidCredentialsException("Incorrect username or password", ex))
                 .switchIfEmpty(Mono.error(new InvalidCredentialsException("Incorrect username or password")))
-                .map(auth -> username)
-                .flatMap(userDetailsService::findByUsername)
-                .map(ud -> {
+                .then(userDetailsService.findByUsername(username))
+                .flatMap(ud -> {
                     List<String> roles = ud.getAuthorities().stream()
                             .map(a -> a.getAuthority())
                             .collect(Collectors.toList());
+
                     String token = jwtTokenUtil.generateToken(ud.getUsername(), roles);
-                    Date exp = jwtTokenUtil.getExpirationDateFromToken(token);
+                    Date exp     = jwtTokenUtil.getExpirationDateFromToken(token);
                     long expiresIn = (exp.getTime() - System.currentTimeMillis()) / 1000;
+
                     AuthResponse resp = new AuthResponse();
                     resp.setToken(token);
                     resp.setUsername(ud.getUsername());
                     resp.setExpiresIn(expiresIn);
                     resp.setRoles(roles);
-                    return resp;
+                    return Mono.just(resp);
                 });
     }
 
     @Override
     @Audit(action = "User Logout", resource = "Authentication")
     public Mono<Void> logout(String token) {
-        log.debug("Logging out token: {}", token);
-        // TODO: blacklist token if needed
-        return Mono.empty();
+        if (token == null || token.isBlank()) {
+            return Mono.empty();
+        }
+        log.debug("Blacklisting JWT until expiry");
+        Date exp = jwtTokenUtil.getExpirationDateFromToken(token);
+        long ttlSeconds = Math.max(0, (exp.getTime() - System.currentTimeMillis()) / 1000);
+        String key = "jwtBlacklist:" + token;
+        return redisTemplate.opsForValue()
+                .set(key, Boolean.TRUE, Duration.ofSeconds(ttlSeconds))
+                .then();
     }
 
     @Override
     @Audit(action = "Password Reset", resource = "User")
     public Mono<Void> resetPassword(PasswordResetRequest req) {
-        Objects.requireNonNull(req.getEmail(), "Email must be provided");
-        Objects.requireNonNull(req.getToken(), "Reset token must be provided");
-        Objects.requireNonNull(req.getNewPassword(), "New password must be provided");
+        String email = req.getEmail().trim();
+        String newPwd = req.getNewPassword().trim();
+        // assume you’ve validated req.getToken() elsewhere
 
-        // TODO: validate req.getToken() against your reset-token store
-
-        return userRepository.findByEmail(req.getEmail())
-                .switchIfEmpty(Mono.error(new UserNotFoundException(
-                        "User not found with email: " + req.getEmail())))
+        return userRepository.findByEmail(email)
+                .switchIfEmpty(Mono.error(new UserNotFoundException("No user with email: " + email)))
                 .flatMap(user -> {
-                    user.setPassword(passwordEncoder.encode(req.getNewPassword()));
-                    log.debug("Reset password for user {}", user.getUsername());
+                    user.setPassword(passwordEncoder.encode(newPwd));
+                    log.info("Reset password for {}", user.getUsername());
                     return userRepository.save(user).then();
                 });
     }
@@ -131,24 +148,48 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Audit(action = "Change Password", resource = "User")
     public Mono<Void> changePassword(PasswordChangeRequest req) {
-        Objects.requireNonNull(req.getOldPassword(), "Old password must be provided");
-        Objects.requireNonNull(req.getNewPassword(), "New password must be provided");
+        String oldPwd = req.getOldPassword().trim();
+        String newPwd = req.getNewPassword().trim();
 
         return ReactiveSecurityContextHolder.getContext()
                 .map(SecurityContext::getAuthentication)
                 .map(Authentication::getName)
-                .flatMap(username ->
-                        userRepository.findByUsername(username)
-                                .switchIfEmpty(Mono.error(new UserNotFoundException(
-                                        "User not found with username: " + username)))
-                                .flatMap(user -> {
-                                    if (!passwordEncoder.matches(req.getOldPassword(), user.getPassword())) {
-                                        return Mono.error(new BadCredentialsException("Incorrect current password"));
-                                    }
-                                    user.setPassword(passwordEncoder.encode(req.getNewPassword()));
-                                    log.debug("Changed password for user {}", username);
-                                    return userRepository.save(user).then();
-                                })
+                .flatMap(username -> userRepository.findByUsername(username)
+                        .switchIfEmpty(Mono.error(new UserNotFoundException("User not found: " + username)))
+                        .flatMap(user -> {
+                            if (!passwordEncoder.matches(oldPwd, user.getPassword())) {
+                                return Mono.error(new InvalidCredentialsException("Current password is incorrect"));
+                            }
+                            user.setPassword(passwordEncoder.encode(newPwd));
+                            log.info("User {} changed their password", username);
+                            return userRepository.save(user).then();
+                        })
                 );
+    }
+
+    @Override
+    @Audit(action = "Email Verification", resource = "User")
+    public Mono<Void> verifyToken(String token) {
+        if (token == null || token.isBlank()) {
+            return Mono.error(new InvalidCredentialsException("Verification token is required"));
+        }
+
+        return Mono.defer(() -> {
+            if (!jwtTokenUtil.validateToken(token)) {
+                return Mono.error(new InvalidCredentialsException("Invalid or expired verification token"));
+            }
+            String username = jwtTokenUtil.getUsernameFromToken(token);
+            return userRepository.findByUsername(username)
+                    .switchIfEmpty(Mono.error(new UserNotFoundException("User not found: " + username)))
+                    .flatMap(user -> {
+                        if (user.isEnabled()) {
+                            log.info("User {} already verified", username);
+                            return Mono.empty();
+                        }
+                        user.setEnabled(true);
+                        log.info("User {} has been verified and enabled", username);
+                        return userRepository.save(user).then();
+                    });
+        });
     }
 }

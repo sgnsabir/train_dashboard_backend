@@ -61,8 +61,8 @@ public class MaintenancePredictionController {
         log.info("Fetching maintenance schedule");
 
         List<MaintenanceScheduleDTO> schedule = List.of(
-                new MaintenanceScheduleDTO("2025-02-10T00:00:00.000+01:00", 1, "2025-02-10", "Wheel alignment for Car 2"),
-                new MaintenanceScheduleDTO("2025-02-15T00:00:00.000+01:00", 2, "2025-02-15", "Brake inspection for Car 1")
+                new MaintenanceScheduleDTO("2025-02-10T00:00:00.000+01:00", 1, "2025-02-10", "Wheel alignment for Car 2", "Wheel", "completed"),
+                new MaintenanceScheduleDTO("2025-02-15T00:00:00.000+01:00", 2, "2025-02-15", "Brake inspection for Car 1", "Brake", "Pending")
         );
 
         return Mono.just(ResponseEntity.ok(schedule))

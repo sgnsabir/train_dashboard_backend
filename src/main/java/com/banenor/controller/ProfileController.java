@@ -1,4 +1,3 @@
-// src/main/java/com/banenor/controller/ProfileController.java
 package com.banenor.controller;
 
 import com.banenor.dto.UserDTO;
@@ -7,6 +6,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -72,6 +72,8 @@ public class ProfileController {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ProfileUpdateRequest {
+        @NotBlank(message = "Username must not be blank")
+        private String username;
         @Email(message = "Invalid email format")
         private String email;
 

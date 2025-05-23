@@ -33,3 +33,11 @@ cors:
   allowed-origins: "http://localhost:3000"
   allowed-methods: GET,POST,OPTIONS
   allowed-headers: "*"
+mail:
+  host: smtp.gmail.com
+  port: 587
+  ssl: false
+  starttls: true
+  username: selbdtest@gmail.com
+  password: your-email-password
+  max-pool-size: 4

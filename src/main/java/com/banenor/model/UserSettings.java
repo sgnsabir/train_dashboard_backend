@@ -20,12 +20,16 @@ import java.time.LocalDateTime;
 public class UserSettings {
 
     @Id
-    private Long userId; // primary key (equals the user id)
+    private Long userId;
 
     // General Settings
     private String username;
     private String email;
     private String avatarUrl;
+    private String language;
+    private String timezone;
+    private String dateFormat;
+    private Theme theme;
 
     // Dashboard Widget Settings
     private Boolean showSpeedWidget;
@@ -44,7 +48,12 @@ public class UserSettings {
     @CreatedDate
     @Column("created_at")
     private LocalDateTime createdAt;
+
     @LastModifiedDate
     @Column("updated_at")
     private LocalDateTime updatedAt;
+
+    public enum Theme {
+        LIGHT, DARK, SYSTEM
+    }
 }

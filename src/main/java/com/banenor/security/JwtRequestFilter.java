@@ -136,9 +136,9 @@ public class JwtRequestFilter implements WebFilter {
 
     private boolean isPublicPath(String path) {
         return path.startsWith("/api/v1/auth/login")
-                || path.startsWith("/api/v1/auth/register")
                 || path.startsWith("/api/v1/auth/refresh")
                 || path.startsWith("/api/v1/auth/reset-password")
+                || path.startsWith("/api/v1/auth/verify")
                 || path.startsWith("/swagger-ui/")
                 || path.startsWith("/v3/api-docs/")
                 || path.startsWith("/actuator/");

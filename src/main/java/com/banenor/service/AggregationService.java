@@ -4,6 +4,8 @@ import reactor.core.publisher.Mono;
 
 public interface AggregationService {
 
+    Mono<Double> getAverageVibration(Integer trainNo);
+
     // --- Speed Aggregations ---
     Mono<Double> getAverageSpeed(Integer trainNo);
     Mono<Double> getMinSpeed(Integer trainNo);

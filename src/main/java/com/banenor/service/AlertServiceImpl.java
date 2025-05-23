@@ -1,3 +1,4 @@
+// src/main/java/com/banenor/service/AlertServiceImpl.java
 package com.banenor.service;
 
 import com.banenor.dto.AlertAcknowledgeRequest;
@@ -5,10 +6,11 @@ import com.banenor.dto.AlertResponse;
 import com.banenor.mapper.AlertHistoryMapper;
 import com.banenor.model.AlertHistory;
 import com.banenor.repository.AlertHistoryRepository;
+import io.vertx.ext.mail.MailClient;
+import io.vertx.ext.mail.MailMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.mail.SimpleMailMessage;
-import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
@@ -21,89 +23,101 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class AlertServiceImpl implements AlertService {
 
-    private final JavaMailSender mailSender;
+    private final MailClient mailClient;
     private final AlertHistoryRepository alertRepo;
     private final AlertHistoryMapper mapper;
 
+    @Value("${mail.from}")
+    private String fromAddress;
+
+    @Value("${alert.email.to}")
+    private String alertToAddress;
+
     @Scheduled(fixedRateString = "${alert.check.interval.ms:60000}")
     public void scheduledCheckSensorThresholds() {
-        checkSensorThresholds().subscribe();
+        checkSensorThresholds()
+                .doOnError(err -> log.error("Scheduled sensor check failed", err))
+                .subscribe();
     }
 
     @Override
     public Mono<Void> checkSensorThresholds() {
-        // ... your existing stub logic ...
-        Double avg = 85.0, thresh = 80.0;
+        double avg = 85.0, thresh = 80.0;
         if (avg > thresh) {
-            String subj = "High Average Speed Alert";
-            String txt = "Average speed " + avg + " km/h exceeds threshold!";
-            return sendEmailAndPersist(subj, txt);
+            String subject = "High Average Speed Alert";
+            String body    = "Average speed " + avg + " km/h exceeds threshold!";
+            return sendEmailAndPersist(subject, body);
         }
         return Mono.empty();
     }
 
-    private Mono<Void> sendEmailAndPersist(String subject, String text) {
-        return Mono.fromRunnable(() -> {
-                    SimpleMailMessage m = new SimpleMailMessage();
-                    m.setTo("alert@example.com");
-                    m.setSubject(subject);
-                    m.setText(text);
-                    mailSender.send(m);
-                })
+    private Mono<Void> sendEmailAndPersist(String subject, String body) {
+        MailMessage msg = new MailMessage()
+                .setFrom(fromAddress)
+                .setTo(alertToAddress)
+                .setSubject(subject)
+                .setText(body);
+
+        return Mono.<Void>create(sink ->
+                        mailClient.sendMail(msg, ar -> {
+                            if (ar.succeeded()) {
+                                log.info("Alert email sent to {} (subject={})", alertToAddress, subject);
+                                sink.success();
+                            } else {
+                                log.error("Failed to send alert email to {}", alertToAddress, ar.cause());
+                                sink.error(ar.cause());
+                            }
+                        })
+                )
                 .then(Mono.defer(() -> {
-                    AlertHistory e = AlertHistory.builder()
+                    AlertHistory entry = AlertHistory.builder()
                             .subject(subject)
-                            .text(text)
+                            .text(body)
                             .timestamp(LocalDateTime.now())
                             .acknowledged(false)
                             .build();
-                    return alertRepo.save(e);
+                    return alertRepo.save(entry);
                 }))
-                .doOnNext(saved -> log.debug("Persisted alert {}", saved.getId()))
+                .doOnNext(saved -> log.debug("Persisted alert history id={}", saved.getId()))
                 .then();
     }
 
     @Override
     public Flux<AlertResponse> getAlertHistory() {
-        // original, unfiltered history
         return alertRepo.findAllByOrderByTimestampDesc()
                 .map(mapper::toDto)
-                .map(dto -> {
-                    AlertResponse r = new AlertResponse();
-                    r.setId(dto.getId());
-                    r.setSubject(dto.getSubject());
-                    r.setMessage(dto.getText());
-                    r.setTimestamp(dto.getTimestamp());
-                    r.setAcknowledged(dto.getAcknowledged());
-                    r.setAcknowledgedBy(dto.getAcknowledgedBy());
-                    r.setTrainNo(dto.getTrainNo());
-                    r.setSeverity(dto.getSeverity());
-                    return r;
+                .map(r -> {
+                    var dto = new AlertResponse();
+                    dto.setId(r.getId());
+                    dto.setSubject(r.getSubject());
+                    dto.setMessage(r.getText());
+                    dto.setTimestamp(r.getTimestamp());
+                    dto.setAcknowledged(r.getAcknowledged());
+                    dto.setAcknowledgedBy(r.getAcknowledgedBy());
+                    dto.setTrainNo(r.getTrainNo());
+                    dto.setSeverity(r.getSeverity());
+                    return dto;
                 });
     }
 
     @Override
-    public Flux<AlertResponse> getAlertHistory(
-            Integer trainNo,
-            LocalDateTime from,
-            LocalDateTime to
-    ) {
-        // filtered history — reuses the no-arg method
+    public Flux<AlertResponse> getAlertHistory(Integer trainNo, LocalDateTime from, LocalDateTime to) {
         return getAlertHistory()
                 .filter(r -> from == null || !r.getTimestamp().isBefore(from))
                 .filter(r -> to   == null || !r.getTimestamp().isAfter(to));
-        // TODO: once you persist trainNo in AlertHistory, add:
-        // .filter(r -> trainNo == null || trainNo.equals(r.getTrainNo()))
     }
 
     @Override
-    public Mono<Void> acknowledgeAlert(AlertAcknowledgeRequest request) {
-        return alertRepo.findById(request.getAlertId())
+    public Mono<Void> acknowledgeAlert(AlertAcknowledgeRequest req) {
+        log.info("Acknowledging alert id={} by {}", req.getAlertId(), req.getAcknowledgedBy());
+        return alertRepo.findById(req.getAlertId())
+                .switchIfEmpty(Mono.error(new IllegalArgumentException("Alert not found: " + req.getAlertId())))
                 .flatMap(alert -> {
                     alert.setAcknowledged(true);
+                    alert.setAcknowledgedBy(req.getAcknowledgedBy());
                     return alertRepo.save(alert);
                 })
-                .then()
-                .doOnSuccess(v -> log.info("Alert {} acknowledged", request.getAlertId()));
+                .doOnSuccess(saved -> log.debug("Alert {} marked acknowledged by {}", req.getAlertId(), req.getAcknowledgedBy()))
+                .then();
     }
 }

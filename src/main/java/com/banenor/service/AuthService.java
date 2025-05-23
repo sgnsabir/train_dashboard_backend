@@ -7,6 +7,8 @@ import reactor.core.publisher.Mono;
 public interface AuthService {
     Mono<User> register(RegistrationRequest registrationRequest);
 
+    Mono<Void> verifyToken(String token);
+
     Mono<AuthResponse> login(LoginRequest loginRequest);
 
     Mono<Void> logout(String token);

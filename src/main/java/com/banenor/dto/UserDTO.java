@@ -1,5 +1,6 @@
 package com.banenor.dto;
 
+import io.r2dbc.spi.Blob;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
 import java.time.LocalDateTime;

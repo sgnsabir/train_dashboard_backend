@@ -1,3 +1,4 @@
+// src/main/java/com/banenor/model/AlertHistory.java
 package com.banenor.model;
 
 import lombok.*;
@@ -22,7 +23,6 @@ public class AlertHistory {
     @Column("id")
     private Long id;
 
-    /** Alert subject/title */
     @Column("subject")
     private String subject;
 
@@ -34,7 +34,14 @@ public class AlertHistory {
     @Column("timestamp")
     private LocalDateTime timestamp;
 
-    /** Whether the alert has been acknowledged */
+    /** Whether the alert has been acknowledged (i.e. read) */
     @Column("acknowledged")
     private Boolean acknowledged;
+
+    /**
+     * Who acknowledged (read) this alert.
+     * Will be null until someone marks it acknowledged.
+     */
+    @Column("acknowledged_by")
+    private String acknowledgedBy;
 }

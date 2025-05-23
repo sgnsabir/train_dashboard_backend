@@ -1,10 +1,10 @@
-// src/main/java/com/banenor/controller/AlertController.java
 package com.banenor.controller;
 
 import com.banenor.dto.AlertAcknowledgeRequest;
 import com.banenor.dto.AlertDTO;
 import com.banenor.dto.AlertStatsDTO;
 import com.banenor.service.AlertService;
+import com.banenor.websocket.WebSocketBroadcaster;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -29,6 +29,7 @@ import java.time.LocalDateTime;
 public class AlertController {
 
     private final AlertService alertService;
+    private final WebSocketBroadcaster broadcaster;
 
     @Operation(
             summary = "Get Alert History",
@@ -48,13 +49,14 @@ public class AlertController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
     ) {
         log.info("Fetching alert history: trainNo={}, from={}, to={}", trainNo, from, to);
+
         return alertService.getAlertHistory(trainNo, from, to)
                 .map(this::toDto)
                 .subscribeOn(Schedulers.boundedElastic())
                 .doOnNext(dto -> log.debug("Fetched alert DTO: {}", dto))
                 .doOnError(ex -> log.error("Error retrieving alert history", ex))
                 .onErrorResume(ex -> {
-                    log.warn("Resuming with empty history due to error");
+                    log.warn("Resuming with empty history due to error: {}", ex.getMessage());
                     return Flux.empty();
                 });
     }
@@ -76,23 +78,19 @@ public class AlertController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
     ) {
         log.info("Fetching alert stats: from={}, to={}", from, to);
+
         return alertService.getAlertHistory(null, from, to)
                 .collectList()
                 .map(list -> {
-                    long info     = list.stream()
-                            .filter(a -> a.getSeverity() == AlertDTO.Severity.INFO)
-                            .count();
-                    long warn     = list.stream()
-                            .filter(a -> a.getSeverity() == AlertDTO.Severity.WARN)
-                            .count();
-                    long critical = list.stream()
-                            .filter(a -> a.getSeverity() == AlertDTO.Severity.CRITICAL)
-                            .count();
+                    long info     = list.stream().filter(a -> a.getSeverity() == AlertDTO.Severity.INFO).count();
+                    long warn     = list.stream().filter(a -> a.getSeverity() == AlertDTO.Severity.WARN).count();
+                    long critical = list.stream().filter(a -> a.getSeverity() == AlertDTO.Severity.CRITICAL).count();
                     long total    = list.size();
-                    return new AlertStatsDTO(info, warn, critical, total, from, to);
+                    AlertStatsDTO stats = new AlertStatsDTO(info, warn, critical, total, from, to);
+                    log.debug("Computed alert stats: {}", stats);
+                    return stats;
                 })
                 .subscribeOn(Schedulers.boundedElastic())
-                .doOnSuccess(stats -> log.debug("Computed alert stats: {}", stats))
                 .doOnError(ex -> log.error("Error retrieving alert stats", ex));
     }
 
@@ -117,15 +115,28 @@ public class AlertController {
             return Mono.just(ResponseEntity.badRequest().build());
         }
 
-        log.info("Acknowledging alert with id: {}", id);
+        log.info("Acknowledging alert id={}", id);
         return alertService.acknowledgeAlert(request)
                 .then(Mono.fromSupplier(() -> {
                     log.debug("Successfully acknowledged alert id {}", id);
+
+                    // Broadcast acknowledgment to WebSocket clients
+                    AlertDTO ackDto = AlertDTO.builder()
+                            .id(id)
+                            .acknowledged(true)
+                            .acknowledgedBy(request.getAcknowledgedBy())
+                            .build();
+                    broadcaster.publish(ackDto, "ALERT_ACK");
+                    log.debug("Broadcasted ALERT_ACK for id {}", id);
+
                     return ResponseEntity.ok().<Void>build();
                 }))
                 .subscribeOn(Schedulers.boundedElastic())
-                .doOnError(ex -> log.error("Error acknowledging alert id " + id, ex))
-                .onErrorResume(ex -> Mono.just(ResponseEntity.status(500).build()));
+                .doOnError(ex -> log.error("Error during acknowledgment of alert id={}", id, ex))
+                .onErrorResume(ex -> {
+                    log.error("Acknowledgment failed for alert id={}: {}", id, ex.getMessage());
+                    return Mono.just(ResponseEntity.status(500).build());
+                });
     }
 
     private AlertDTO toDto(com.banenor.dto.AlertResponse r) {

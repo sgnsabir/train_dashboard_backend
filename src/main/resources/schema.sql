@@ -310,18 +310,38 @@ CREATE TABLE IF NOT EXISTS station_synchronization (
 );
 
 -- ==========================================================
--- 5. User Dashboard Settings
+-- 5. Table: user_settings
+-- Consolidates general, dashboard, notification & security
 -- ==========================================================
-CREATE TABLE IF NOT EXISTS user_dashboard_settings (
-    settings_id    SERIAL PRIMARY KEY,
-    user_id        INT NOT NULL,
-    dashboard_type VARCHAR(50) NOT NULL,
-    settings       JSONB NOT NULL,
-    created_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at     TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(user_id)
-);
+DROP TABLE IF EXISTS user_settings;
 
+CREATE TABLE user_settings (
+    user_id              BIGINT      PRIMARY KEY
+      REFERENCES users(user_id)
+      ON DELETE CASCADE,
+    -- General Settings
+    username             VARCHAR(100)    NOT NULL,
+    email                VARCHAR(255)    NOT NULL,
+    avatar_url           VARCHAR(512),
+    language             VARCHAR(50)     NOT NULL DEFAULT 'en',
+    timezone             VARCHAR(50)     NOT NULL DEFAULT 'UTC',
+    date_format          VARCHAR(50)     NOT NULL DEFAULT 'yyyy-MM-dd',
+    theme                VARCHAR(20)     NOT NULL DEFAULT 'SYSTEM',
+    -- Dashboard Widget Settings
+    show_speed_widget        BOOLEAN    NOT NULL DEFAULT TRUE,
+    show_fuel_widget         BOOLEAN    NOT NULL DEFAULT TRUE,
+    show_performance_widget  BOOLEAN    NOT NULL DEFAULT TRUE,
+    -- Notification Settings
+    enable_notifications     BOOLEAN    NOT NULL DEFAULT TRUE,
+    email_alerts             BOOLEAN    NOT NULL DEFAULT TRUE,
+    sms_alerts               BOOLEAN    NOT NULL DEFAULT FALSE,
+    -- Security Settings
+    two_factor_enabled       BOOLEAN    NOT NULL DEFAULT FALSE,
+    phone_number             VARCHAR(20),
+    -- Timestamps
+    created_at           TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TIMESTAMPTZ   NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 -- ==========================================================
 -- 6. Alert History
 -- ==========================================================
@@ -355,3 +375,13 @@ CREATE TABLE IF NOT EXISTS digital_twins (
 
 CREATE INDEX IF NOT EXISTS idx_dtm_asset_time
   ON digital_twins(asset_id, recorded_at DESC);
+-- ==========================================================
+-- 8. Verification token
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS verification_tokens (
+    id SERIAL PRIMARY KEY,
+    token VARCHAR(255) NOT NULL UNIQUE,
+    user_id BIGINT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
