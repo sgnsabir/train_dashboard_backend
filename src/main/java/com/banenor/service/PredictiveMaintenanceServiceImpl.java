@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import com.banenor.ai.AIPredictiveMaintenanceService;
 import com.banenor.config.MaintenanceProperties;
 import com.banenor.dto.PredictiveMaintenanceResponse;
-import com.banenor.dto.SensorDataDTO;
+import com.banenor.dto.AxlesDataDTO;
 import com.banenor.events.MaintenanceRiskEvent;
 import com.banenor.strategy.RiskCalculationStrategy;
 
@@ -102,7 +102,7 @@ public class PredictiveMaintenanceServiceImpl implements PredictiveMaintenanceSe
     }
 
     @Override
-    public Mono<Void> processMaintenanceData(SensorDataDTO sensorData) {
+    public Mono<Void> processMaintenanceData(AxlesDataDTO sensorData) {
         return calculateRiskScore(sensorData.getTrainNo())
                 .flatMap(riskScore -> {
                     if (riskScore >= maintenanceProperties.getRiskScoreThreshold()) {

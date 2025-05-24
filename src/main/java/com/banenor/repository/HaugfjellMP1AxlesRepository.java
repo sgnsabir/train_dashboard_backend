@@ -2,6 +2,7 @@ package com.banenor.repository;
 
 import com.banenor.dto.SensorAggregationDTO;
 import com.banenor.model.HaugfjellMP1Axles;
+import org.reactivestreams.Publisher;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
 import org.springframework.stereotype.Repository;
@@ -27,6 +28,8 @@ public interface HaugfjellMP1AxlesRepository extends R2dbcRepository<HaugfjellMP
                     GROUP BY vit
             """)
     Flux<SensorAggregationDTO> aggregateSensorDataByRange(LocalDateTime startDate, LocalDateTime endDate);
+
+    Publisher<?> findByCreatedAtBetween(LocalDateTime from, LocalDateTime to);
 
     interface SpeedDynamicAggregation {
         String getVit();

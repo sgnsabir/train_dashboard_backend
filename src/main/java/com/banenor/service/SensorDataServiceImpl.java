@@ -102,4 +102,13 @@ public class SensorDataServiceImpl implements SensorDataService {
                 .then()
                 .subscribeOn(Schedulers.boundedElastic());
     }
+
+    @Override
+    public Flux<Object> getSensorDataByRange(LocalDateTime from, LocalDateTime to) {
+        return Flux.concat(
+                        mp1Repo.findByCreatedAtBetween(from, to),
+                        mp3Repo.findByCreatedAtBetween(from, to)
+                )
+                .subscribeOn(Schedulers.boundedElastic());
+    }
 }

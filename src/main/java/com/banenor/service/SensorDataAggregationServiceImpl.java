@@ -1,7 +1,6 @@
 package com.banenor.service;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 import org.springframework.scheduling.annotation.Scheduled;
@@ -29,25 +28,18 @@ public class SensorDataAggregationServiceImpl implements SensorDataAggregationSe
      * Aggregates sensor data for an arbitrary date range.
      */
     @Override
-    public Mono<Void> aggregateSensorDataByRange(String startDate, String endDate) {
-        return aggregateSensorDataByRangeReactive(startDate, endDate);
-    }
+    public Mono<Void> aggregateSensorDataByRange(LocalDateTime start, LocalDateTime end) {
+        // MP1 stream
+        Flux<SensorAggregationDTO> mp1Flux = mp1Repo.aggregateSensorDataByRange(start, end)
+                .doOnNext(r -> log.info("[MP1] vit={} avgSpeed={} minSpeed={} maxSpeed={}",
+                        r.getVit(), r.getAvgSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
 
-    private Mono<Void> aggregateSensorDataByRangeReactive(String startDate, String endDate) {
-        // Parse ISO-8601 date-time inputs, e.g. "2025-05-01T00:00:00"
-        DateTimeFormatter formatter = DateTimeFormatter.ISO_DATE_TIME;
-        LocalDateTime start = LocalDateTime.parse(startDate, formatter);
-        LocalDateTime end   = LocalDateTime.parse(endDate,   formatter);
+        // MP3 stream
+        Flux<SensorAggregationDTO> mp3Flux = mp3Repo.aggregateSensorDataByRange(start, end)
+                .doOnNext(r -> log.info("[MP3] vit={} avgSpeed={} minSpeed={} maxSpeed={}",
+                        r.getVit(), r.getAvgSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
 
-        Flux<SensorAggregationDTO> mp1Aggregation = mp1Repo.aggregateSensorDataByRange(start, end);
-        Flux<SensorAggregationDTO> mp3Aggregation = mp3Repo.aggregateSensorDataByRange(start, end);
-
-        return Flux.concat(mp1Aggregation, mp3Aggregation)
-                .collectList()
-                .doOnNext(list -> list.forEach(dto ->
-                        log.info("Aggregated Result → vit: {}, avgSpeed: {}, minSpeed: {}, maxSpeed: {}",
-                                dto.getVit(), dto.getAvgSpeed(), dto.getMinSpeed(), dto.getMaxSpeed())
-                ))
+        return Flux.concat(mp1Flux, mp3Flux)
                 .then()
                 .subscribeOn(Schedulers.boundedElastic());
     }
@@ -57,15 +49,11 @@ public class SensorDataAggregationServiceImpl implements SensorDataAggregationSe
      */
     @Override
     public Mono<Void> aggregateSensorData() {
-        return aggregateSensorDataReactive();
-    }
-
-    private Mono<Void> aggregateSensorDataReactive() {
         // Monos order:
-        //  0–9   MP1 averages: speed, aoa, vibL, vibR, vfrcl, vfrcr, lfrcl, lfrcr, lvibl, lvibr
-        //  10    MP1 avg square speed
-        // 11–20  MP3 averages
-        // 21     MP3 avg square speed
+        // 0–9   MP1 averages: speed, aoa, vibL, vibR, vfrcl, vfrcr, lfrcl, lfrcr, lvibl, lvibr
+        // 10    MP1 avg square speed
+        // 11–20 MP3 averages
+        // 21    MP3 avg square speed
         List<Mono<Double>> sources = List.of(
                 mp1Repo.findGlobalAverageSpeed().defaultIfEmpty(0.0),
                 mp1Repo.findGlobalAverageAoa().defaultIfEmpty(0.0),
@@ -135,10 +123,10 @@ public class SensorDataAggregationServiceImpl implements SensorDataAggregationSe
                     double globalAvgAoa = circularMean(mp1AvgAoa, mp3AvgAoa);
 
                     // Variance
-                    double globalAvgSpeedSquare = combine(mp1AvgSpeedSquare, mp3AvgSpeedSquare);
-                    double speedVariance        = globalAvgSpeedSquare - Math.pow(globalAvgSpeed, 2);
+                    double globalAvgSpeedSq = combine(mp1AvgSpeedSquare, mp3AvgSpeedSquare);
+                    double speedVariance    = globalAvgSpeedSq - Math.pow(globalAvgSpeed, 2);
 
-                    // Log all of it
+                    // Log everything
                     log.info("Global average speed (spd): {}", globalAvgSpeed);
                     log.info("Global average AOA   (aoa): {}", globalAvgAoa);
                     log.info("Global average vibration left (vvibl): {}", globalAvgVibLeft);
@@ -177,12 +165,11 @@ public class SensorDataAggregationServiceImpl implements SensorDataAggregationSe
     }
 
     /**
-     * Compute the circular mean of two angles (in radians):
-     * handles wrap-around by averaging unit vectors.
+     * Compute the circular mean of two angles (in radians) to handle wrap-around.
      */
-    private double circularMean(double theta1, double theta2) {
-        double s = Math.sin(theta1) + Math.sin(theta2);
-        double c = Math.cos(theta1) + Math.cos(theta2);
+    private double circularMean(double θ1, double θ2) {
+        double s = Math.sin(θ1) + Math.sin(θ2);
+        double c = Math.cos(θ1) + Math.cos(θ2);
         return Math.atan2(s, c);
     }
 }

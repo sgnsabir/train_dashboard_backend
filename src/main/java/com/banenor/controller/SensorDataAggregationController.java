@@ -3,32 +3,69 @@ package com.banenor.controller;
 import com.banenor.dto.SensorAggregationDTO;
 import com.banenor.service.AggregationService;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/aggregations")
-@Tag(name = "Sensor Aggregations", description = "Endpoints for retrieving aggregated sensor metrics")
+@Tag(name = "Sensor Aggregations", description = "Endpoints for retrieving aggregated sensor metrics and triggering aggregations")
+@Slf4j
+@RequiredArgsConstructor
 public class SensorDataAggregationController {
 
     private final AggregationService aggregationService;
 
-    public SensorDataAggregationController(AggregationService aggregationService) {
-        this.aggregationService = aggregationService;
+    //───────────────────────────────────────────────────────────────────────────────
+    // 0) Trigger sensor-data aggregation over a time-range
+    //───────────────────────────────────────────────────────────────────────────────
+
+    @Operation(
+            summary     = "Trigger aggregated sensor metrics",
+            description = "Compute (and persist/cache) aggregated sensor metrics over the given time-range"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Aggregations triggered successfully"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @GetMapping
+    public Mono<ResponseEntity<Void>> triggerAggregations(
+            @RequestParam("from")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam("to")
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to
+    ) {
+        log.info("GET /api/v1/aggregations?from={} → to={}", from, to);
+        return aggregationService.aggregateSensorDataByRange(from, to)
+                .then(Mono.fromSupplier(() -> {
+                    log.info("← Aggregations complete for range {} → {}", from, to);
+                    return ResponseEntity.ok().<Void>build();
+                }))
+                .onErrorResume(err -> {
+                    log.error("Aggregation failed for range {} → {}", from, to, err);
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
-    //––– Speed & AOA –––//
+    //───────────────────────────────────────────────────────────────────────────────
+    // 1) Individual sensor‐type aggregations per analysisId
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Operation(summary = "Get Speed Aggregations", description = "Retrieve aggregated speed metrics for a given analysis ID")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Speed aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -39,18 +76,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinSpeed(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxSpeed(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getSpeedVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageSpeed(t.getT1());
-            dto.setMinSpeed(t.getT2());
-            dto.setMaxSpeed(t.getT3());
-            dto.setSpeedVariance(t.getT4());
+            dto.setAverageSpeed(tuple.getT1());
+            dto.setMinSpeed(tuple.getT2());
+            dto.setMaxSpeed(tuple.getT3());
+            dto.setSpeedVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     @Operation(summary = "Get AOA Aggregations", description = "Retrieve aggregated Angle of Attack (AOA) metrics for a given analysis ID")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "AOA aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -61,20 +98,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinAoa(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxAoa(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getAoaVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageAoa(t.getT1());
-            dto.setMinAoa(t.getT2());
-            dto.setMaxAoa(t.getT3());
-            dto.setAoaVariance(t.getT4());
+            dto.setAverageAoa(tuple.getT1());
+            dto.setMinAoa(tuple.getT2());
+            dto.setMaxAoa(tuple.getT3());
+            dto.setAoaVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    //––– Vibration –––//
-
     @Operation(summary = "Get Vibration Left Aggregations", description = "Retrieve left‐side vibration metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Left vibration aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -85,18 +120,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinVibrationLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxVibrationLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getVibrationLeftVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageVibrationLeft(t.getT1());
-            dto.setMinVibrationLeft(t.getT2());
-            dto.setMaxVibrationLeft(t.getT3());
-            dto.setVibrationLeftVariance(t.getT4());
+            dto.setAverageVibrationLeft(tuple.getT1());
+            dto.setMinVibrationLeft(tuple.getT2());
+            dto.setMaxVibrationLeft(tuple.getT3());
+            dto.setVibrationLeftVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     @Operation(summary = "Get Vibration Right Aggregations", description = "Retrieve right‐side vibration metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Right vibration aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -107,20 +142,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinVibrationRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxVibrationRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getVibrationRightVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageVibrationRight(t.getT1());
-            dto.setMinVibrationRight(t.getT2());
-            dto.setMaxVibrationRight(t.getT3());
-            dto.setVibrationRightVariance(t.getT4());
+            dto.setAverageVibrationRight(tuple.getT1());
+            dto.setMinVibrationRight(tuple.getT2());
+            dto.setMaxVibrationRight(tuple.getT3());
+            dto.setVibrationRightVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    //––– Vertical Force –––//
-
     @Operation(summary = "Get Vertical Force Left Aggregations", description = "Retrieve left‐side vertical force metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Left vertical force aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -131,18 +164,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinVerticalForceLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxVerticalForceLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getVerticalForceLeftVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageVerticalForceLeft(t.getT1());
-            dto.setMinVerticalForceLeft(t.getT2());
-            dto.setMaxVerticalForceLeft(t.getT3());
-            dto.setVerticalForceLeftVariance(t.getT4());
+            dto.setAverageVerticalForceLeft(tuple.getT1());
+            dto.setMinVerticalForceLeft(tuple.getT2());
+            dto.setMaxVerticalForceLeft(tuple.getT3());
+            dto.setVerticalForceLeftVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     @Operation(summary = "Get Vertical Force Right Aggregations", description = "Retrieve right‐side vertical force metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Right vertical force aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -153,20 +186,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinVerticalForceRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxVerticalForceRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getVerticalForceRightVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageVerticalForceRight(t.getT1());
-            dto.setMinVerticalForceRight(t.getT2());
-            dto.setMaxVerticalForceRight(t.getT3());
-            dto.setVerticalForceRightVariance(t.getT4());
+            dto.setAverageVerticalForceRight(tuple.getT1());
+            dto.setMinVerticalForceRight(tuple.getT2());
+            dto.setMaxVerticalForceRight(tuple.getT3());
+            dto.setVerticalForceRightVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    //––– Lateral Force –––//
-
     @Operation(summary = "Get Lateral Force Left Aggregations", description = "Retrieve left‐side lateral force metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Left lateral force aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -177,18 +208,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinLateralForceLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxLateralForceLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getLateralForceLeftVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageLateralForceLeft(t.getT1());
-            dto.setMinLateralForceLeft(t.getT2());
-            dto.setMaxLateralForceLeft(t.getT3());
-            dto.setLateralForceLeftVariance(t.getT4());
+            dto.setAverageLateralForceLeft(tuple.getT1());
+            dto.setMinLateralForceLeft(tuple.getT2());
+            dto.setMaxLateralForceLeft(tuple.getT3());
+            dto.setLateralForceLeftVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     @Operation(summary = "Get Lateral Force Right Aggregations", description = "Retrieve right‐side lateral force metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Right lateral force aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -199,20 +230,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinLateralForceRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxLateralForceRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getLateralForceRightVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageLateralForceRight(t.getT1());
-            dto.setMinLateralForceRight(t.getT2());
-            dto.setMaxLateralForceRight(t.getT3());
-            dto.setLateralForceRightVariance(t.getT4());
+            dto.setAverageLateralForceRight(tuple.getT1());
+            dto.setMinLateralForceRight(tuple.getT2());
+            dto.setMaxLateralForceRight(tuple.getT3());
+            dto.setLateralForceRightVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    //––– Lateral Vibration –––//
-
     @Operation(summary = "Get Lateral Vibration Left Aggregations", description = "Retrieve left‐side lateral vibration metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Left lateral vibration aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -223,18 +252,18 @@ public class SensorDataAggregationController {
                 aggregationService.getMinLateralVibrationLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxLateralVibrationLeft(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getLateralVibrationLeftVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageLateralVibrationLeft(t.getT1());
-            dto.setMinLateralVibrationLeft(t.getT2());
-            dto.setMaxLateralVibrationLeft(t.getT3());
-            dto.setLateralVibrationLeftVariance(t.getT4());
+            dto.setAverageLateralVibrationLeft(tuple.getT1());
+            dto.setMinLateralVibrationLeft(tuple.getT2());
+            dto.setMaxLateralVibrationLeft(tuple.getT3());
+            dto.setLateralVibrationLeftVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
     @Operation(summary = "Get Lateral Vibration Right Aggregations", description = "Retrieve right‐side lateral vibration metrics")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Right lateral vibration aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -245,20 +274,22 @@ public class SensorDataAggregationController {
                 aggregationService.getMinLateralVibrationRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getMaxLateralVibrationRight(analysisId).defaultIfEmpty(0.0),
                 aggregationService.getLateralVibrationRightVariance(analysisId).defaultIfEmpty(0.0)
-        ).map(t -> {
+        ).map(tuple -> {
             SensorAggregationDTO dto = new SensorAggregationDTO();
-            dto.setAverageLateralVibrationRight(t.getT1());
-            dto.setMinLateralVibrationRight(t.getT2());
-            dto.setMaxLateralVibrationRight(t.getT3());
-            dto.setLateralVibrationRightVariance(t.getT4());
+            dto.setAverageLateralVibrationRight(tuple.getT1());
+            dto.setMinLateralVibrationRight(tuple.getT2());
+            dto.setMaxLateralVibrationRight(tuple.getT3());
+            dto.setLateralVibrationRightVariance(tuple.getT4());
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
 
-    //––– All Aggregations (including both left & right where applicable) –––//
+    //───────────────────────────────────────────────────────────────────────────────
+    // 2) Consolidated “all” endpoint
+    //───────────────────────────────────────────────────────────────────────────────
 
     @Operation(summary = "Get All Aggregations", description = "Retrieve consolidated aggregated metrics for all sensor types for a given analysis ID")
-    @ApiResponses(value = {
+    @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Consolidated aggregations retrieved successfully"),
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
@@ -325,6 +356,7 @@ public class SensorDataAggregationController {
             Object[] r = results;
             SensorAggregationDTO dto = new SensorAggregationDTO();
             int i = 0;
+
             dto.setAverageSpeed((Double) r[i++]);
             dto.setMinSpeed((Double) r[i++]);
             dto.setMaxSpeed((Double) r[i++]);

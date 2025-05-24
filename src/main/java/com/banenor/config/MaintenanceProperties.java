@@ -43,8 +43,10 @@ public class MaintenanceProperties {
     private double realtimeSpeedThreshold = 100.0;
     private double realtimeVibrationLeftThreshold = 5.0;
     private double realtimeVibrationRightThreshold = 5.0;
-    private double realtimeVerticalForceRightThreshold = 550.0;
     private double realtimeVerticalForceLeftThreshold = 550.0;
+    private double realtimeVerticalForceRightThreshold = 550.0;
+    private double realtimeLateralForceLeftThreshold = 350.0;
     private double realtimeLateralForceRightThreshold = 350.0;
+    private double realtimeLateralVibrationLeftThreshold = 2.5;
     private double realtimeLateralVibrationRightThreshold = 2.5;
 }

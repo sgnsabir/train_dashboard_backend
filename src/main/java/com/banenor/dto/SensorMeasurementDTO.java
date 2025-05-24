@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 @Builder
 @Slf4j
 public class SensorMeasurementDTO {
-
+//RawDataResponse will be deleted after first release this will handle that identical dto also
     /**
      * The train/analysis identifier.
      */
@@ -31,11 +31,22 @@ public class SensorMeasurementDTO {
     @NotNull(message = "Timestamp cannot be null")
     private LocalDateTime measurementTime;
 
-
-
     // --- Raw TP Measurements ---
 
-    // Speed
+    // --- Header / Meta fields ---
+    private Integer axleId;
+    private String ait;
+    private String vty;
+    private String vit;
+    private String aiv;
+    private String fe;
+    private String idRf2R;
+
+    private Integer analysisId;
+    private LocalDateTime createdAt;
+    private Integer segmentId;
+
+    // --- Speed Measurements ---
     private Double spdTp1;
     private Double spdTp2;
     private Double spdTp3;
@@ -43,15 +54,7 @@ public class SensorMeasurementDTO {
     private Double spdTp6;
     private Double spdTp8;
 
-    // Angle of Attack
-    private Double aoaTp1;
-    private Double aoaTp2;
-    private Double aoaTp3;
-    private Double aoaTp5;
-    private Double aoaTp6;
-    private Double aoaTp8;
-
-    // Vertical Force - Left
+    // --- Vertical Forces (Left) ---
     private Double vfrclTp1;
     private Double vfrclTp2;
     private Double vfrclTp3;
@@ -59,7 +62,7 @@ public class SensorMeasurementDTO {
     private Double vfrclTp6;
     private Double vfrclTp8;
 
-    // Vertical Force - Right
+    // --- Vertical Forces (Right) ---
     private Double vfrcrTp1;
     private Double vfrcrTp2;
     private Double vfrcrTp3;
@@ -67,7 +70,15 @@ public class SensorMeasurementDTO {
     private Double vfrcrTp6;
     private Double vfrcrTp8;
 
-    // Vertical Vibration - Left
+    // --- Angle of Attack ---
+    private Double aoaTp1;
+    private Double aoaTp2;
+    private Double aoaTp3;
+    private Double aoaTp5;
+    private Double aoaTp6;
+    private Double aoaTp8;
+
+    // --- Vertical Vibration (Left) ---
     private Double vviblTp1;
     private Double vviblTp2;
     private Double vviblTp3;
@@ -75,7 +86,7 @@ public class SensorMeasurementDTO {
     private Double vviblTp6;
     private Double vviblTp8;
 
-    // Vertical Vibration - Right
+    // --- Vertical Vibration (Right) ---
     private Double vvibrTp1;
     private Double vvibrTp2;
     private Double vvibrTp3;
@@ -83,7 +94,7 @@ public class SensorMeasurementDTO {
     private Double vvibrTp6;
     private Double vvibrTp8;
 
-    // Time Delay - Left
+    // --- Time Delay (Left) ---
     private Double dtlTp1;
     private Double dtlTp2;
     private Double dtlTp3;
@@ -91,7 +102,7 @@ public class SensorMeasurementDTO {
     private Double dtlTp6;
     private Double dtlTp8;
 
-    // Time Delay - Right
+    // --- Time Delay (Right) ---
     private Double dtrTp1;
     private Double dtrTp2;
     private Double dtrTp3;
@@ -99,39 +110,43 @@ public class SensorMeasurementDTO {
     private Double dtrTp6;
     private Double dtrTp8;
 
-    // Lateral Force - Left
+    // --- Lateral Force (Left) ---
     private Double lfrclTp1;
     private Double lfrclTp2;
     private Double lfrclTp3;
     private Double lfrclTp5;
     private Double lfrclTp6;
 
-    // Lateral Force - Right
+    // --- Lateral Force (Right) ---
     private Double lfrcrTp1;
     private Double lfrcrTp2;
     private Double lfrcrTp3;
     private Double lfrcrTp5;
     private Double lfrcrTp6;
 
-    // Lateral Vibration - Left
+    // --- Lateral Vibration (Left) ---
     private Double lviblTp1;
     private Double lviblTp2;
     private Double lviblTp3;
     private Double lviblTp5;
     private Double lviblTp6;
 
-    // Lateral Vibration - Right
+    // --- Lateral Vibration (Right) ---
     private Double lvibrTp1;
     private Double lvibrTp2;
     private Double lvibrTp3;
     private Double lvibrTp5;
     private Double lvibrTp6;
 
-    // Longitudinal
+    // --- Longitudinal Measurements ---
     private Double lnglTp1;
     private Double lnglTp8;
     private Double lngrTp1;
     private Double lngrTp8;
+
+    // For filtering by a specific sensor type at runtime
+    private String sensorType;
+    private Double value;
 
     // --- Convenience Getters for Dashboard Charts ---
 

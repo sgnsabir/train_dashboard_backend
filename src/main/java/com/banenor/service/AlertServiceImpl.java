@@ -1,4 +1,3 @@
-// src/main/java/com/banenor/service/AlertServiceImpl.java
 package com.banenor.service;
 
 import com.banenor.dto.AlertAcknowledgeRequest;
@@ -41,7 +40,7 @@ public class AlertServiceImpl implements AlertService {
     }
 
     @Override
-    public Mono<Void> checkSensorThresholds() {
+    public Mono<Void> checkSensorThresholds() { //its only demo purpose, will be removed in production and only RealtimeAlertService will work further
         double avg = 85.0, thresh = 80.0;
         if (avg > thresh) {
             String subject = "High Average Speed Alert";

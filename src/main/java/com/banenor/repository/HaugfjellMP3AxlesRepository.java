@@ -2,6 +2,7 @@ package com.banenor.repository;
 
 import com.banenor.dto.SensorAggregationDTO;
 import com.banenor.model.HaugfjellMP3Axles;
+import org.reactivestreams.Publisher;
 import org.springframework.data.r2dbc.repository.Query;
 import org.springframework.data.r2dbc.repository.R2dbcRepository;
 import org.springframework.stereotype.Repository;
@@ -67,6 +68,8 @@ public interface HaugfjellMP3AxlesRepository extends R2dbcRepository<HaugfjellMP
             GROUP BY vit
             """)
     Flux<SpeedDynamicAggregation> findDynamicSpeedAggregationsByTrainNo(Integer trainNo);
+
+    Publisher<?> findByCreatedAtBetween(LocalDateTime from, LocalDateTime to);
 
     interface SpeedDynamicAggregation {
         String getVit();
@@ -226,7 +229,6 @@ public interface HaugfjellMP3AxlesRepository extends R2dbcRepository<HaugfjellMP
 
     interface LateralForceLeftDynamicAggregation {
         String getVit();
-
         Double getAvgLateralForceLeft();
 
         Double getMinLateralForceLeft();
@@ -260,6 +262,8 @@ public interface HaugfjellMP3AxlesRepository extends R2dbcRepository<HaugfjellMP
         Double getMaxLateralForceRight();
 
         Double getAvgSquareLateralForceRight();
+
+
     }
 
     // 2.9 Lateral Vibration (Left)

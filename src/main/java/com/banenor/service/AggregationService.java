@@ -2,6 +2,8 @@ package com.banenor.service;
 
 import reactor.core.publisher.Mono;
 
+import java.time.LocalDateTime;
+
 public interface AggregationService {
 
     Mono<Double> getAverageVibration(Integer trainNo);
@@ -65,4 +67,6 @@ public interface AggregationService {
     Mono<Double> getMinLateralVibrationRight(Integer trainNo);
     Mono<Double> getMaxLateralVibrationRight(Integer trainNo);
     Mono<Double> getLateralVibrationRightVariance(Integer trainNo);
+
+    Mono<Void> aggregateSensorDataByRange(LocalDateTime startDate, LocalDateTime endDate);
 }

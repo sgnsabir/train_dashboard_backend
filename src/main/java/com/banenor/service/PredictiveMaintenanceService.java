@@ -3,7 +3,7 @@ package com.banenor.service;
 import org.springframework.stereotype.Service;
 
 import com.banenor.dto.PredictiveMaintenanceResponse;
-import com.banenor.dto.SensorDataDTO;
+import com.banenor.dto.AxlesDataDTO;
 
 import reactor.core.publisher.Mono;
 
@@ -19,5 +19,5 @@ public interface PredictiveMaintenanceService {
      * @param sensorData The sensor data to process
      * @return A Mono that completes when processing is done
      */
-    Mono<Void> processMaintenanceData(SensorDataDTO sensorData);
+    Mono<Void> processMaintenanceData(AxlesDataDTO sensorData);
 }

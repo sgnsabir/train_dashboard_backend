@@ -1,6 +1,6 @@
 package com.banenor.kafka;
 
-import com.banenor.dto.SensorDataDTO;
+import com.banenor.dto.SensorMeasurementDTO;
 import com.banenor.service.DataService;
 import com.banenor.service.RealtimeAlertService;
 import com.banenor.websocket.WebSocketBroadcaster;
@@ -31,21 +31,17 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Consumes sensor data from Kafka, processes it, triggers real-time alerts,
- * and broadcasts sensor updates over WebSocket for frontend dashboards.
- */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class SensorDataConsumer {
 
-    private final KafkaReceiver<String, SensorDataDTO> kafkaReceiver;
+    private final KafkaReceiver<String, SensorMeasurementDTO> kafkaReceiver;
     private final DataService dataService;
     private final RealtimeAlertService alertService;
+    private final WebSocketBroadcaster broadcaster;
     private final MeterRegistry meterRegistry;
     private final ObjectMapper objectMapper;
-    private final WebSocketBroadcaster broadcaster;
 
     @Value("${kafka.sensor.topic:sensor-data-topic}")
     private String sensorTopic;
@@ -65,9 +61,9 @@ public class SensorDataConsumer {
     private boolean healthCheckEnabled;
 
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
-    private final AtomicBoolean healthy = new AtomicBoolean(true);
-    private volatile Throwable lastError;
-    private Timer processingTimer;
+    private final AtomicBoolean healthy    = new AtomicBoolean(true);
+    private volatile     Throwable  lastError;
+    private             Timer      processingTimer;
 
     @PostConstruct
     public void init() {
@@ -75,127 +71,125 @@ public class SensorDataConsumer {
                 .description("Latency of sensor data processing pipeline")
                 .publishPercentiles(0.5, 0.95, 0.99)
                 .register(meterRegistry);
+        log.debug("SensorDataConsumer initialized");
     }
 
     @PreDestroy
     public void shutdown() {
         if (isRunning.compareAndSet(true, false)) {
+            log.info("Stopping consumer, waiting up to {}s for in-flight work …", shutdownTimeoutSeconds);
             try {
                 Thread.sleep(Duration.ofSeconds(shutdownTimeoutSeconds).toMillis());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for shutdown", e);
             }
         }
     }
 
     @EventListener(ApplicationStartedEvent.class)
     public void startConsumer() {
-        if (isRunning.compareAndSet(false, true)) {
+        if (!isRunning.getAndSet(true)) {
             kafkaReceiver.receive()
                     .publishOn(Schedulers.boundedElastic())
                     .bufferTimeout(batchSize, Duration.ofSeconds(5))
-                    .flatMap(records -> Flux.fromIterable(records).flatMap(this::processRecord))
+                    .flatMap(batch -> Flux.fromIterable(batch).flatMap(this::processRecord))
                     .doOnError(this::handleConsumerError)
-                    .doOnNext(v -> healthy.set(true))
+                    .doOnNext(ignored -> healthy.set(true))
                     .retryWhen(Retry.backoff(Long.MAX_VALUE, Duration.ofSeconds(1))
                             .maxBackoff(Duration.ofMinutes(5))
-                            .doBeforeRetry(signal -> {
+                            .doBeforeRetry(sig -> {
                                 healthy.set(false);
-                                lastError = signal.failure();
-                                log.warn("Kafka consumer retry #{} due to {}", signal.totalRetries(), signal.failure().getMessage());
+                                lastError = sig.failure();
+                                log.warn("Consumer retry #{}, cause: {}",
+                                        sig.totalRetries(), sig.failure().toString());
                             }))
                     .subscribe();
 
-            log.info("Kafka consumer started for topic='{}', group='{}'", sensorTopic, consumerGroupId);
+            log.info("Kafka consumer started (topic='{}', group='{}')", sensorTopic, consumerGroupId);
         }
     }
 
     @Bean
-    @ConditionalOnProperty(value = "kafka.consumer.health-check-enabled", havingValue = "true", matchIfMissing = true)
+    @ConditionalOnProperty(value = "kafka.consumer.health-check-enabled", havingValue = "true")
     public HealthIndicator kafkaConsumerHealthIndicator() {
         return () -> {
-            if (!healthCheckEnabled) {
-                return org.springframework.boot.actuate.health.Health.unknown().build();
-            }
             if (!isRunning.get()) {
-                return org.springframework.boot.actuate.health.Health.down().withDetail("reason", "Consumer not running").build();
+                return org.springframework.boot.actuate.health.Health.down()
+                        .withDetail("reason", "Consumer not running")
+                        .build();
             }
             if (!healthy.get()) {
                 return org.springframework.boot.actuate.health.Health.down()
-                        .withDetail("reason", "Unhealthy consumer")
+                        .withDetail("reason",    "Unhealthy consumer")
                         .withDetail("lastError", lastError != null ? lastError.getMessage() : "none")
                         .build();
             }
             return org.springframework.boot.actuate.health.Health.up()
-                    .withDetail("topic", sensorTopic)
+                    .withDetail("topic",   sensorTopic)
                     .withDetail("groupId", consumerGroupId)
                     .build();
         };
     }
 
-    private Mono<Void> processRecord(ReceiverRecord<String, SensorDataDTO> record) {
-        SensorDataDTO sensorData = record.value();
-        if (sensorData == null) {
+    private Mono<Void> processRecord(ReceiverRecord<String, SensorMeasurementDTO> record) {
+        SensorMeasurementDTO m = record.value();
+        if (m == null) {
+            log.debug("Skipping null record at offset {}", record.offset());
+            acknowledge(record);
             return Mono.empty();
         }
 
-        meterRegistry.counter("sensor.data.received",
-                        "sensor_id", sensorData.getSensorId(),
-                        "train_no", String.valueOf(sensorData.getTrainNo()))
-                .increment();
-
+        log.debug("Processing record: trainNo={}, offset={}", m.getTrainNo(), record.offset());
+        meterRegistry.counter("sensor.data.received", "train_no", String.valueOf(m.getTrainNo())).increment();
         long start = System.nanoTime();
 
-        Mono<Void> pipeline = Mono.defer(() -> {
+        return Mono.defer(() -> {
                     String payload;
                     try {
-                        payload = objectMapper.writeValueAsString(sensorData);
-                    } catch (JsonProcessingException e) {
-                        log.error("Serialization error for sensorData={} : {}", sensorData, e.getMessage(), e);
+                        payload = objectMapper.writeValueAsString(m);
+                    } catch (JsonProcessingException ex) {
+                        log.error("Failed to serialize measurement {}: {}", m, ex.getMessage(), ex);
                         return Mono.empty();
                     }
-
-                    // 1) Persist data
-                    // 2) Broadcast to WebSocket clients
-                    // 3) Trigger alerts
                     return dataService.processSensorData(payload)
                             .then(Mono.fromRunnable(() -> {
-                                broadcaster.publish(sensorData, "SENSOR_DATA");
-                                log.debug("Broadcasted SENSOR_DATA for trainNo={}", sensorData.getTrainNo());
+                                broadcaster.publish(m, "SENSOR_DATA");
+                                log.debug("Broadcasted SENSOR_DATA for trainNo={}", m.getTrainNo());
                             }))
-                            .then(alertService.monitorAndAlert(sensorData.getTrainNo(), defaultAlertEmail)
+                            .then(alertService.monitorAndAlert(m.getTrainNo(), defaultAlertEmail)
                                     .onErrorResume(ex -> {
-                                        log.warn("Alert dispatch failed for trainNo={} : {}", sensorData.getTrainNo(), ex.getMessage());
+                                        log.warn("Alert dispatch failed for trainNo={} : {}", m.getTrainNo(), ex.getMessage());
                                         return Mono.empty();
                                     }));
                 })
                 .timeout(Duration.ofSeconds(30))
                 .retryWhen(Retry.backoff(maxRetryAttempts, Duration.ofMillis(retryDelayMs))
-                        .doBeforeRetry(sig -> log.warn("Processing retry #{} for record offset={} : {}",
-                                sig.totalRetries(), record.offset(), sig.failure().getMessage())))
-                .doOnSuccess(v -> acknowledge(record))
-                .doOnError(e -> handlingProcessingError(record, e));
-
-        return pipeline.doFinally(sig -> {
-            long duration = System.nanoTime() - start;
-            processingTimer.record(duration, TimeUnit.NANOSECONDS);
-        });
+                        .doBeforeRetry(sig -> log.debug("Retry #{}, offset {}: {}",
+                                sig.totalRetries(), record.offset(), sig.failure().toString())))
+                .doOnError(e -> handlingProcessingError(record, e))
+                .doOnSuccess(ignored -> acknowledge(record))
+                .doFinally(sig -> {
+                    long latency = System.nanoTime() - start;
+                    processingTimer.record(latency, TimeUnit.NANOSECONDS);
+                });
     }
 
-    private void acknowledge(ReceiverRecord<String, SensorDataDTO> record) {
+    private void acknowledge(ReceiverRecord<String, ?> record) {
         ReceiverOffset offset = record.receiverOffset();
         offset.acknowledge();
         meterRegistry.counter("sensor.data.processed",
                         "partition", String.valueOf(record.partition()),
-                        "topic", record.topic())
+                        "topic",     record.topic())
                 .increment();
+        log.debug("Acknowledged offset={} partition={}", record.offset(), record.partition());
     }
 
-    private void handlingProcessingError(ReceiverRecord<String, SensorDataDTO> record, Throwable error) {
+    private void handlingProcessingError(ReceiverRecord<String, ?> record, Throwable error) {
         meterRegistry.counter("sensor.data.processing.failures",
-                        "topic", record.topic(),
+                        "topic",     record.topic(),
                         "partition", String.valueOf(record.partition()),
-                        "error", error.getClass().getSimpleName())
+                        "error",     error.getClass().getSimpleName())
                 .increment();
         log.error("Error processing record topic={} partition={} offset={} : {}",
                 record.topic(), record.partition(), record.offset(), error.getMessage(), error);
@@ -203,9 +197,7 @@ public class SensorDataConsumer {
 
     private void handleConsumerError(Throwable error) {
         healthy.set(false);
-        meterRegistry.counter("sensor.data.consumer.errors",
-                        "error", error.getClass().getSimpleName())
-                .increment();
+        meterRegistry.counter("sensor.data.consumer.errors", "error", error.getClass().getSimpleName()).increment();
         log.error("Kafka consumer fatal error: {}", error.getMessage(), error);
     }
 }

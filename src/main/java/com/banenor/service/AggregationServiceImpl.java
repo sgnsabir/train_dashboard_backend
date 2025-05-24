@@ -1,13 +1,17 @@
 package com.banenor.service;
 
+import com.banenor.dto.SensorAggregationDTO;
 import com.banenor.repository.HaugfjellMP1AxlesRepository;
 import com.banenor.repository.HaugfjellMP3AxlesRepository;
 import com.banenor.util.RepositoryResolver;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
+import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.function.Function;
 
@@ -24,6 +28,22 @@ public class AggregationServiceImpl implements AggregationService {
     //───────────────────────────────────────────────────────────────────────────────
     // COMBINED VIBRATION METRIC (for AdminDashboard "avgVibration")
     //───────────────────────────────────────────────────────────────────────────────
+    @Override
+    public Mono<Void> aggregateSensorDataByRange(LocalDateTime start, LocalDateTime end) {
+        // MP1 stream
+        Flux<SensorAggregationDTO> mp1Flux = mp1Repo.aggregateSensorDataByRange(start, end)
+                .doOnNext(r -> log.info("[MP1] vit={} avgSpeed={} minSpeed={} maxSpeed={}",
+                        r.getVit(), r.getAvgSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
+
+        // MP3 stream
+        Flux<SensorAggregationDTO> mp3Flux = mp3Repo.aggregateSensorDataByRange(start, end)
+                .doOnNext(r -> log.info("[MP3] vit={} avgSpeed={} minSpeed={} maxSpeed={}",
+                        r.getVit(), r.getAvgSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
+
+        return Flux.concat(mp1Flux, mp3Flux)
+                .then()
+                .subscribeOn(Schedulers.boundedElastic());
+    }
 
     @Override
     public Mono<Double> getAverageVibration(Integer trainNo) {

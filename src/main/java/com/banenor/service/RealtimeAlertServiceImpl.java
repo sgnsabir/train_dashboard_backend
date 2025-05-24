@@ -221,6 +221,16 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
                 maintenanceProperties.getRealtimeVerticalForceRightThreshold(), "kN"
         ));
 
+        Mono<Void> lfLeft = safeMono(
+                repo.findDynamicLateralForceLeftAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgLateralForceLeft())
+                        .reduce(Double::max)
+                        .defaultIfEmpty(0.0)
+        ).flatMap(latest -> sendThresholdAlert(
+                trainNo, alertEmail, "Lateral Force Left", toDouble.apply(latest),
+                maintenanceProperties.getRealtimeLateralForceLeftThreshold(), "kN"
+        ));
+
         Mono<Void> lfRight = safeMono(
                 repo.findDynamicLateralForceRightAggregationsByTrainNo(trainNo)
                         .map(agg -> agg.getAvgLateralForceRight())
@@ -229,6 +239,16 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
         ).flatMap(latest -> sendThresholdAlert(
                 trainNo, alertEmail, "Lateral Force Right", toDouble.apply(latest),
                 maintenanceProperties.getRealtimeLateralForceRightThreshold(), "kN"
+        ));
+
+        Mono<Void> lvLeft = safeMono(
+                repo.findDynamicLateralVibrationLeftAggregationsByTrainNo(trainNo)
+                        .map(agg -> agg.getAvgLateralVibrationLeft())
+                        .reduce(Double::max)
+                        .defaultIfEmpty(0.0)
+        ).flatMap(latest -> sendThresholdAlert(
+                trainNo, alertEmail, "Lateral Vibration Left", toDouble.apply(latest),
+                maintenanceProperties.getRealtimeLateralVibrationLeftThreshold(), ""
         ));
 
         Mono<Void> lvRight = safeMono(
@@ -241,6 +261,6 @@ public class RealtimeAlertServiceImpl implements RealtimeAlertService {
                 maintenanceProperties.getRealtimeLateralVibrationRightThreshold(), ""
         ));
 
-        return Mono.whenDelayError(speed, vibLeft, vibRight, vfLeft, vfRight, lfRight, lvRight);
+        return Mono.whenDelayError(speed, vibLeft, vibRight, vfLeft, vfRight, lfLeft, lfRight, lvLeft, lvRight);
     }
 }

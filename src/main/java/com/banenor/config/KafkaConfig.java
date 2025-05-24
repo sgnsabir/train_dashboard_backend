@@ -1,39 +1,33 @@
-// src/main/java/com/banenor/config/KafkaConfig.java
 package com.banenor.config;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Collections;
-
+import com.banenor.dto.SensorMeasurementDTO;
+import com.banenor.events.MaintenanceRiskEvent;
+import io.micrometer.core.instrument.MeterRegistry;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
-
-import io.micrometer.core.instrument.MeterRegistry;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
 import reactor.kafka.sender.KafkaSender;
 import reactor.kafka.sender.SenderOptions;
 
-import com.banenor.dto.SensorDataDTO;
-import com.banenor.events.MaintenanceRiskEvent;
-
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 @Slf4j
 @Configuration
@@ -41,8 +35,8 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class KafkaConfig {
 
-    private final MeterRegistry meterRegistry;
-    private final KafkaProperties kafkaProperties;
+    private final MeterRegistry    meterRegistry;
+    private final KafkaProperties  kafkaProperties;
 
     @Value("${kafka.bootstrap-servers:kafka:9092}")
     private String bootstrapServers;
@@ -87,8 +81,13 @@ public class KafkaConfig {
         }
     }
 
+    // —————————————————————————————————————————————————————————————————————————————
+    // 1) KafkaAdmin to auto-create topics
+    // —————————————————————————————————————————————————————————————————————————————
+
     @Bean
     public KafkaAdmin kafkaAdmin() {
+        validateConfiguration();
         Map<String, Object> props = new HashMap<>();
         props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         KafkaAdmin admin = new KafkaAdmin(props);
@@ -97,7 +96,24 @@ public class KafkaConfig {
     }
 
     @Bean
+    public NewTopic sensorTopic() {
+        log.info("Ensuring sensor topic '{}' exists", sensorTopic);
+        return new NewTopic(sensorTopic, 3, (short) 1);
+    }
+
+    @Bean
+    public NewTopic maintenanceRiskTopic() {
+        log.info("Ensuring risk topic '{}' exists", maintenanceRiskTopic);
+        return new NewTopic(maintenanceRiskTopic, 3, (short) 1);
+    }
+
+    // —————————————————————————————————————————————————————————————————————————————
+    // 2) String-based Producer (for simple messages)
+    // —————————————————————————————————————————————————————————————————————————————
+
+    @Bean
     public Map<String, Object> stringProducerConfigs() {
+        validateConfiguration();
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
@@ -117,6 +133,10 @@ public class KafkaConfig {
     public KafkaTemplate<String, String> stringKafkaTemplate() {
         return new KafkaTemplate<>(stringProducerFactory());
     }
+
+    // —————————————————————————————————————————————————————————————————————————————
+    // 3) RiskEvent Producer (JSON)
+    // —————————————————————————————————————————————————————————————————————————————
 
     @Bean
     public Map<String, Object> riskEventProducerConfigs() {
@@ -141,18 +161,22 @@ public class KafkaConfig {
         return KafkaSender.create(SenderOptions.create(riskEventProducerConfigs()));
     }
 
+    // —————————————————————————————————————————————————————————————————————————————
+    // 4) Spring‐Kafka Consumer (for @KafkaListener use)
+    // —————————————————————————————————————————————————————————————————————————————
+
     @Bean
     public Map<String, Object> consumerConfigs() {
         validateConfiguration();
         Map<String, Object> props = new HashMap<>();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, sensorConsumerGroupId);
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,   bootstrapServers);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG,            sensorConsumerGroupId);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG,   autoOffsetReset);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,   StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, maxPollRecords);
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, enableAutoCommit);
-        props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG, isolationLevel);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,    maxPollRecords);
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,  enableAutoCommit);
+        props.put(ConsumerConfig.ISOLATION_LEVEL_CONFIG,     isolationLevel);
         return props;
     }
 
@@ -162,7 +186,7 @@ public class KafkaConfig {
     }
 
     @Bean(name = "stringKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> kafkaListenerContainerFactory() {
+    public ConcurrentKafkaListenerContainerFactory<String, String> stringKafkaListenerContainerFactory() {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, String>();
         factory.setConsumerFactory(consumerFactory());
         factory.setConcurrency(3);
@@ -170,13 +194,16 @@ public class KafkaConfig {
         return factory;
     }
 
+    // —————————————————————————————————————————————————————————————————————————————
+    // 5) RiskEvent Consumer (for @KafkaListener of MaintenanceRiskEvent)
+    // —————————————————————————————————————————————————————————————————————————————
+
     @Bean
     public Map<String, Object> riskConsumerConfigs() {
         Map<String, Object> props = new HashMap<>(consumerConfigs());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, riskConsumerGroupId);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, MaintenanceRiskEvent.class.getName());
-        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.banenor.events");
+        props.put(JsonDeserializer.TRUSTED_PACKAGES,    "com.banenor.events");
         props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
         return props;
     }
@@ -187,7 +214,8 @@ public class KafkaConfig {
                 new JsonDeserializer<>(MaintenanceRiskEvent.class, false)
                         .trustedPackages("com.banenor.events")
                         .ignoreTypeHeaders();
-        return new DefaultKafkaConsumerFactory<>(riskConsumerConfigs(), new StringDeserializer(), deserializer);
+        return new DefaultKafkaConsumerFactory<>(riskConsumerConfigs(),
+                new StringDeserializer(), deserializer);
     }
 
     @Bean(name = "riskKafkaListenerContainerFactory")
@@ -199,30 +227,30 @@ public class KafkaConfig {
         return factory;
     }
 
+    // —————————————————————————————————————————————————————————————————————————————
+    // 6) Reactor-Kafka Receiver for SensorMeasurementDTO
+    // —————————————————————————————————————————————————————————————————————————————
+
     @Bean
-    public KafkaReceiver<String, SensorDataDTO> sensorDataKafkaReceiver() {
+    public KafkaReceiver<String, SensorMeasurementDTO> sensorDataKafkaReceiver() {
         validateConfiguration();
+
+        // Base consumer props, overriding deserializer
         Map<String, Object> props = new HashMap<>(consumerConfigs());
-        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, SensorDataDTO.class.getName());
-        props.put(JsonDeserializer.TRUSTED_PACKAGES, "com.banenor.dto");
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, SensorMeasurementDTO.class.getName());
+        props.put(JsonDeserializer.TRUSTED_PACKAGES,    "com.banenor.dto");
         props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
 
-        JsonDeserializer<SensorDataDTO> sensorDeserializer =
-                new JsonDeserializer<>(SensorDataDTO.class, false)
+        JsonDeserializer<SensorMeasurementDTO> sensorDeserializer =
+                new JsonDeserializer<>(SensorMeasurementDTO.class, false)
                         .trustedPackages("com.banenor.dto");
 
-        ReceiverOptions<String, SensorDataDTO> receiverOptions =
-                ReceiverOptions.<String, SensorDataDTO>create(props)
+        ReceiverOptions<String, SensorMeasurementDTO> opts =
+                ReceiverOptions.<String, SensorMeasurementDTO>create(props)
                         .withKeyDeserializer(new StringDeserializer())
                         .withValueDeserializer(sensorDeserializer)
                         .subscription(Collections.singletonList(sensorTopic));
 
-        return KafkaReceiver.create(receiverOptions);
-    }
-
-    @Bean
-    public NewTopic maintenanceRiskTopic() {
-        log.info("Ensuring topic '{}' exists", maintenanceRiskTopic);
-        return new NewTopic(maintenanceRiskTopic, 3, (short) 1);
+        return KafkaReceiver.create(opts);
     }
 }
