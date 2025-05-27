@@ -33,12 +33,12 @@ public class AggregationServiceImpl implements AggregationService {
         // MP1 stream
         Flux<SensorAggregationDTO> mp1Flux = mp1Repo.aggregateSensorDataByRange(start, end)
                 .doOnNext(r -> log.info("[MP1] vit={} avgSpeed={} minSpeed={} maxSpeed={}",
-                        r.getVit(), r.getAvgSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
+                        r.getVit(), r.getAverageSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
 
         // MP3 stream
         Flux<SensorAggregationDTO> mp3Flux = mp3Repo.aggregateSensorDataByRange(start, end)
                 .doOnNext(r -> log.info("[MP3] vit={} avgSpeed={} minSpeed={} maxSpeed={}",
-                        r.getVit(), r.getAvgSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
+                        r.getVit(), r.getAverageSpeed(), r.getMinSpeed(), r.getMaxSpeed()));
 
         return Flux.concat(mp1Flux, mp3Flux)
                 .then()

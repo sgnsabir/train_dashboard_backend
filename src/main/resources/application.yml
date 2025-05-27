@@ -41,3 +41,11 @@ mail:
   username: selbdtest@gmail.com
   password: your-email-password
   max-pool-size: 4
+
+performance:
+  weights:
+    speed:       0.30
+    accel:       0.15
+    ride:        0.15
+    trackForce:  0.20
+    steering:    0.20

@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class SensorAggregationDTO {
+    private Integer analysisId;
     // Speed metrics
     private Double averageSpeed;
     private Double minSpeed;
@@ -60,6 +61,19 @@ public class SensorAggregationDTO {
     private Double maxLateralVibrationRight;
     private Double lateralVibrationRightVariance;
 
-    private  String vit;
-    private  Double avgSpeed;
+    // Additional existing fields
+    private String vit;
+
+    // ───────────── Additional KPIs used for PI ─────────────
+    /** Mean of positive accelerations (m/s²) */
+    private Double meanPositiveAccel;
+
+    /** RMS of combined vertical & lateral vibrations (mm/s) */
+    private Double rideRms;
+
+    /** (FlL+FlR)/(FvL+FvR) ratio */
+    private Double lvRatio;
+
+    /** Final weighted Performance Index [0–100] */
+    private Double performanceIndex;
 }

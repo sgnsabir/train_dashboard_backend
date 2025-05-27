@@ -1,6 +1,7 @@
 package com.banenor.repository;
 
 import com.banenor.dto.SensorAggregationDTO;
+import com.banenor.model.HaugfjellMP1Axles;
 import com.banenor.model.HaugfjellMP3Axles;
 import org.reactivestreams.Publisher;
 import org.springframework.data.r2dbc.repository.Query;

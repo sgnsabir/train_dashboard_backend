@@ -345,17 +345,25 @@ CREATE TABLE user_settings (
 -- ==========================================================
 -- 6. Alert History
 -- ==========================================================
+
 CREATE TABLE IF NOT EXISTS alert_history (
-    id             SERIAL PRIMARY KEY,
-    subject        VARCHAR(255) NOT NULL,
-    text           TEXT NOT NULL,
-    timestamp      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    acknowledged   BOOLEAN    NOT NULL DEFAULT FALSE
+    id               SERIAL        PRIMARY KEY,
+    subject          VARCHAR(255)  NOT NULL,
+    message          TEXT          NOT NULL,
+    severity         VARCHAR(50),       -- e.g. INFO, WARN, ERROR
+    train_no         INTEGER,       -- corresponds to AlertDTO.trainNo
+    timestamp        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    acknowledged     BOOLEAN       NOT NULL DEFAULT FALSE,
+    acknowledged_by  VARCHAR(255)                    -- who ack’d the alert
 );
 
 -- Index to get most recent alerts quickly
 CREATE INDEX IF NOT EXISTS idx_alert_history_timestamp
     ON alert_history(timestamp DESC);
+
+-- Index to filter by train number efficiently
+CREATE INDEX IF NOT EXISTS idx_alert_history_train_no
+    ON alert_history(train_no);
 
 -- ==========================================================
 -- 7. Digital Twins

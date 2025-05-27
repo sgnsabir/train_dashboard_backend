@@ -157,7 +157,7 @@ public class SensorDataConsumer {
                                 broadcaster.publish(m, "SENSOR_DATA");
                                 log.debug("Broadcasted SENSOR_DATA for trainNo={}", m.getTrainNo());
                             }))
-                            .then(alertService.monitorAndAlert(m.getTrainNo(), defaultAlertEmail)
+                            .then(alertService.monitorAndAlert(m.getTrainNo(), defaultAlertEmail, null, null)
                                     .onErrorResume(ex -> {
                                         log.warn("Alert dispatch failed for trainNo={} : {}", m.getTrainNo(), ex.getMessage());
                                         return Mono.empty();
@@ -167,7 +167,9 @@ public class SensorDataConsumer {
                 .retryWhen(Retry.backoff(maxRetryAttempts, Duration.ofMillis(retryDelayMs))
                         .doBeforeRetry(sig -> log.debug("Retry #{}, offset {}: {}",
                                 sig.totalRetries(), record.offset(), sig.failure().toString())))
-                .doOnError(e -> handlingProcessingError(record, e))
+                .doOnError(e -> {
+                    handlingProcessingError(record, e);
+                })
                 .doOnSuccess(ignored -> acknowledge(record))
                 .doFinally(sig -> {
                     long latency = System.nanoTime() - start;

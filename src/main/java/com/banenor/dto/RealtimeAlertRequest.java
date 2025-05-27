@@ -3,6 +3,7 @@ package com.banenor.dto;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -24,4 +25,12 @@ public class RealtimeAlertRequest {
     @Email(message = "Invalid email format")
     @NotNull(message = "alertEmail is required")
     private String alertEmail;
+
+    /** Optional custom title/subject for this alert */
+    @Size(max = 255, message = "subject too long")
+    private String subject;
+
+    /** Optional custom body/message for this alert */
+    @Size(max = 2000, message = "message too long")
+    private String message;
 }

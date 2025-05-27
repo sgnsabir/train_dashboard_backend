@@ -2,6 +2,7 @@ package com.banenor.controller;
 
 import com.banenor.dto.SensorAggregationDTO;
 import com.banenor.service.AggregationService;
+import com.banenor.service.SensorDataService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -18,6 +19,7 @@ import reactor.core.scheduler.Schedulers;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/aggregations")
@@ -27,6 +29,7 @@ import java.util.List;
 public class SensorDataAggregationController {
 
     private final AggregationService aggregationService;
+    private final SensorDataService sensorDataService;
 
     //───────────────────────────────────────────────────────────────────────────────
     // 0) Trigger sensor-data aggregation over a time-range
@@ -410,4 +413,71 @@ public class SensorDataAggregationController {
             return ResponseEntity.ok(dto);
         }).subscribeOn(Schedulers.boundedElastic());
     }
+
+    //───────────────────────────────────────────────────────────────────────────────
+    // 3) Performance Index endpoint (with optional single‐metric filter and time range)
+    //───────────────────────────────────────────────────────────────────────────────
+
+    @Operation(
+            summary     = "Performance-Index",
+            description = "Returns 0–100 performance score and underlying KPIs; pass ?from=...&to=... for a time window and ?metric=... to get just one field"
+    )
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Performance Index calculated successfully"),
+            @ApiResponse(responseCode = "400", description = "Unknown metric requested"),
+            @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    @GetMapping("/{analysisId}/performance")
+    public Mono<ResponseEntity<?>> getPerformance(
+            @PathVariable Integer analysisId,
+            @RequestParam(value = "from", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime from,
+            @RequestParam(value = "to", required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime to,
+            @RequestParam(value = "metric", required = false) String metric
+    ) {
+        log.info("GET /api/v1/aggregations/{}/performance?from={}→to={}&metric={}",
+                analysisId, from, to, metric);
+
+        Mono<SensorAggregationDTO> resultMono;
+        if (from != null && to != null) {
+            resultMono = sensorDataService.getPerformance(analysisId, from, to);
+        } else {
+            resultMono = sensorDataService.getPerformance(analysisId);
+        }
+
+        return resultMono
+                .map(dto -> {
+                    if (metric == null || metric.isBlank()) {
+                        return ResponseEntity.ok(dto);
+                    }
+                    Object value;
+                    switch (metric) {
+                        case "averageSpeed":       value = dto.getAverageSpeed(); break;
+                        case "averageAoa":         value = dto.getAverageAoa(); break;
+                        case "meanPositiveAccel":  value = dto.getMeanPositiveAccel(); break;
+                        case "rideRms":            value = dto.getRideRms(); break;
+                        case "lvRatio":            value = dto.getLvRatio(); break;
+                        case "performanceIndex":   value = dto.getPerformanceIndex(); break;
+                        default:
+                            return ResponseEntity
+                                    .badRequest()
+                                    .body(Map.of(
+                                            "error", "Unknown metric '" + metric + "'",
+                                            "allowed", List.of(
+                                                    "averageSpeed","averageAoa",
+                                                    "meanPositiveAccel","rideRms",
+                                                    "lvRatio","performanceIndex"
+                                            )
+                                    ));
+                    }
+                    return ResponseEntity.ok(Map.of(metric, value));
+                })
+                .onErrorResume(err -> {
+                    log.error("Performance Index calculation failed for train #{}", analysisId, err);
+                    return Mono.just(ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build());
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
 }

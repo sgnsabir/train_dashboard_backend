@@ -8,7 +8,7 @@ import com.banenor.dto.AlertDTO.Severity;
 public class AlertHistoryDTO {
     private Long id;
     private String subject;
-    private String text;
+    private String message;
     private LocalDateTime timestamp;
     private Boolean acknowledged;
     private String acknowledgedBy;

@@ -105,7 +105,7 @@ public class AlertHistoryRepositoryImpl implements AlertHistoryRepositoryCustom 
         return AlertHistory.builder()
                 .id(row.get("id", Long.class))
                 .subject(row.get("subject", String.class))
-                .text(row.get("text", String.class))
+                .message(row.get("message", String.class))
                 .timestamp(row.get("timestamp", LocalDateTime.class))
                 .acknowledged(row.get("acknowledged", Boolean.class))
                 .build();

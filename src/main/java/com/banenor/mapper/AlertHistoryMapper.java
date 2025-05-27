@@ -11,7 +11,7 @@ public class AlertHistoryMapper {
         AlertHistoryDTO dto = new AlertHistoryDTO();
         dto.setId(entity.getId());
         dto.setSubject(entity.getSubject());
-        dto.setText(entity.getText());
+        dto.setMessage(entity.getMessage());
         dto.setTimestamp(entity.getTimestamp());
         dto.setAcknowledged(entity.getAcknowledged());
         return dto;
@@ -21,7 +21,7 @@ public class AlertHistoryMapper {
         return AlertHistory.builder()
                 .id(dto.getId())
                 .subject(dto.getSubject())
-                .text(dto.getText())
+                .message(dto.getMessage())
                 .timestamp(dto.getTimestamp())
                 .acknowledged(dto.getAcknowledged())
                 .build();

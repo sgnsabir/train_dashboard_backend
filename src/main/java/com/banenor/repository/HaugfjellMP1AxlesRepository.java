@@ -29,6 +29,7 @@ public interface HaugfjellMP1AxlesRepository extends R2dbcRepository<HaugfjellMP
             """)
     Flux<SensorAggregationDTO> aggregateSensorDataByRange(LocalDateTime startDate, LocalDateTime endDate);
 
+
     Publisher<?> findByCreatedAtBetween(LocalDateTime from, LocalDateTime to);
 
     interface SpeedDynamicAggregation {

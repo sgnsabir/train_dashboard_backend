@@ -71,7 +71,7 @@ public class AlertServiceImpl implements AlertService {
                 .then(Mono.defer(() -> {
                     AlertHistory entry = AlertHistory.builder()
                             .subject(subject)
-                            .text(body)
+                            .message(body)
                             .timestamp(LocalDateTime.now())
                             .acknowledged(false)
                             .build();
@@ -89,7 +89,7 @@ public class AlertServiceImpl implements AlertService {
                     var dto = new AlertResponse();
                     dto.setId(r.getId());
                     dto.setSubject(r.getSubject());
-                    dto.setMessage(r.getText());
+                    dto.setMessage(r.getMessage());
                     dto.setTimestamp(r.getTimestamp());
                     dto.setAcknowledged(r.getAcknowledged());
                     dto.setAcknowledgedBy(r.getAcknowledgedBy());
