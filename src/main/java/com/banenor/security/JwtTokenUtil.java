@@ -37,7 +37,7 @@ public class JwtTokenUtil {
     /**
      * Token TTL in seconds.
      */
-    @Value("${jwt.expiration-in-seconds:36000}")
+    @Value("${jwt.expiration-in-seconds:360000}")
     private Long jwtExpirationSeconds;
 
     /**

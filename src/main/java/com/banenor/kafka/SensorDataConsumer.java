@@ -1,6 +1,6 @@
 package com.banenor.kafka;
 
-import com.banenor.dto.SensorMeasurementDTO;
+import com.banenor.dto.RawDataResponse;
 import com.banenor.service.DataService;
 import com.banenor.service.RealtimeAlertService;
 import com.banenor.websocket.WebSocketBroadcaster;
@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RequiredArgsConstructor
 public class SensorDataConsumer {
 
-    private final KafkaReceiver<String, SensorMeasurementDTO> kafkaReceiver;
+    private final KafkaReceiver<String, RawDataResponse> kafkaReceiver;
     private final DataService dataService;
     private final RealtimeAlertService alertService;
     private final WebSocketBroadcaster broadcaster;
@@ -132,8 +132,8 @@ public class SensorDataConsumer {
         };
     }
 
-    private Mono<Void> processRecord(ReceiverRecord<String, SensorMeasurementDTO> record) {
-        SensorMeasurementDTO m = record.value();
+    private Mono<Void> processRecord(ReceiverRecord<String, RawDataResponse> record) {
+        RawDataResponse m = record.value();
         if (m == null) {
             log.debug("Skipping null record at offset {}", record.offset());
             acknowledge(record);

@@ -1,6 +1,6 @@
 package com.banenor.config;
 
-import com.banenor.dto.SensorMeasurementDTO;
+import com.banenor.dto.RawDataResponse;
 import com.banenor.events.MaintenanceRiskEvent;
 import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
@@ -228,25 +228,25 @@ public class KafkaConfig {
     }
 
     // —————————————————————————————————————————————————————————————————————————————
-    // 6) Reactor-Kafka Receiver for SensorMeasurementDTO
+    // 6) Reactor-Kafka Receiver for RawDataResponse
     // —————————————————————————————————————————————————————————————————————————————
 
     @Bean
-    public KafkaReceiver<String, SensorMeasurementDTO> sensorDataKafkaReceiver() {
+    public KafkaReceiver<String, RawDataResponse> sensorDataKafkaReceiver() {
         validateConfiguration();
 
         // Base consumer props, overriding deserializer
         Map<String, Object> props = new HashMap<>(consumerConfigs());
-        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, SensorMeasurementDTO.class.getName());
+        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, RawDataResponse.class.getName());
         props.put(JsonDeserializer.TRUSTED_PACKAGES,    "com.banenor.dto");
         props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
 
-        JsonDeserializer<SensorMeasurementDTO> sensorDeserializer =
-                new JsonDeserializer<>(SensorMeasurementDTO.class, false)
+        JsonDeserializer<RawDataResponse> sensorDeserializer =
+                new JsonDeserializer<>(RawDataResponse.class, false)
                         .trustedPackages("com.banenor.dto");
 
-        ReceiverOptions<String, SensorMeasurementDTO> opts =
-                ReceiverOptions.<String, SensorMeasurementDTO>create(props)
+        ReceiverOptions<String, RawDataResponse> opts =
+                ReceiverOptions.<String, RawDataResponse>create(props)
                         .withKeyDeserializer(new StringDeserializer())
                         .withValueDeserializer(sensorDeserializer)
                         .subscription(Collections.singletonList(sensorTopic));

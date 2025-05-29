@@ -1,13 +1,14 @@
 package com.banenor.service;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.banenor.dto.AnalysisHeaderDTO;
-import com.banenor.dto.AnalysisMeasurementDTO;
+import com.banenor.dto.*;
 import com.banenor.dto.RawDataResponse;
-import com.banenor.dto.SensorDataPayload;
-import com.banenor.dto.SensorMeasurementDTO;
 import com.banenor.mapper.AxleMapper;
 import com.banenor.mapper.HaugfjellMP1Mapper;
 import com.banenor.mapper.HaugfjellMP3Mapper;
@@ -22,6 +23,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -31,6 +33,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.retry.Retry;
 
+@Slf4j
 @Service
 public class DataServiceImpl implements DataService {
 
@@ -203,7 +206,7 @@ public class DataServiceImpl implements DataService {
     }
 
     @Override
-    public Flux<SensorMeasurementDTO> getDetailedSensorData(Integer analysisId, int page, int size) {
+    public Flux<RawDataResponse> getDetailedSensorData(Integer analysisId, int page, int size) {
         if (analysisId == null || analysisId <= 0) {
             return Flux.error(new IllegalArgumentException("Invalid analysisId"));
         }
@@ -234,4 +237,62 @@ public class DataServiceImpl implements DataService {
                 })
                 .subscribeOn(Schedulers.boundedElastic());
     }
+
+    // inside DataServiceImpl.java
+
+    @Override
+    public Mono<SensorTpSeriesDTO> tpSeries(Integer analysisId,
+                                            String station,
+                                            LocalDateTime start,
+                                            LocalDateTime end,
+                                            String sensor) {
+
+        SensorField field = SensorField.fromCode(sensor);   // validates sensor keyword
+        Flux<RawDataResponse> rows;
+
+        if (analysisId != null) {
+            rows = getDetailedSensorData(analysisId, 0, Integer.MAX_VALUE);
+        } else {
+            Flux<AbstractAxles> ax;
+            switch (station.toUpperCase()) {
+                case "MP1" ->
+                        ax = mp1AxlesRepo.findAllByCreatedAtBetween(start, end).cast(AbstractAxles.class);
+                case "MP3" ->
+                        ax = mp3AxlesRepo.findAllByCreatedAtBetween(start, end).cast(AbstractAxles.class);
+                case "BOTH" ->
+                        ax = Flux.merge(
+                                mp1AxlesRepo.findAllByCreatedAtBetween(start, end),
+                                mp3AxlesRepo.findAllByCreatedAtBetween(start, end)
+                        ).cast(AbstractAxles.class);
+                default  ->
+                { return Mono.error(new IllegalArgumentException("Unknown station " + station)); }
+            }
+            rows = ax.map(axleMapper::toRawDataResponse);
+        }
+
+        return rows.collectList().map(list -> {
+            Map<Integer,List<Double>> map = Map.of(
+                    1, new ArrayList<>(), 2, new ArrayList<>(), 3, new ArrayList<>(),
+                    5, new ArrayList<>(), 6, new ArrayList<>(), 8, new ArrayList<>()
+            );
+
+            list.forEach(dto -> {
+                List<Double> vals = field.extract(dto);        // six-element list
+                int i = 0;
+                for (int tp : List.of(1,2,3,5,6,8)) {
+                    Double v = vals.get(i++);
+                    if (v != null) map.get(tp).add(v);
+                }
+            });
+
+            return new SensorTpSeriesDTO(
+                    analysisId,
+                    sensor,
+                    List.of(1,2,3,5,6,8),
+                    map
+            );
+        });
+    }
+
+
 }
