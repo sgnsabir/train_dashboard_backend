@@ -245,16 +245,6 @@ You can initialize via your preferred tool (Flyway, Liquibase) or run the provid
 * **Port clashes**: Adjust `server.port` in `application.yml`.
 * **Missing tables**: Run SQL DDL or attach your migration tool.
 
----
-
-> **Next Steps:**
->
-> * Integrate with the AI microservice (`AI_SERVICE_URL`) for real‐time predictions
-> * Add CI/CD pipeline in `.github/workflows`
-> * Expand unit & integration tests under `src/test/java`
-
----
-
 ## **Happy coding!** 🚀
 
 **License:** Apache 2.0
